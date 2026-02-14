@@ -37,16 +37,9 @@ class CsvLogger:
             self.file.close()
 
 
-def get_exp_name(seed):
+def get_exp_name(env_name, agent_name, seed):
     """Return the experiment name."""
-    exp_name = ''
-    exp_name += f'sd{seed:03d}_'
-    if 'SLURM_JOB_ID' in os.environ:
-        exp_name += f's_{os.environ["SLURM_JOB_ID"]}.'
-    if 'SLURM_PROCID' in os.environ:
-        exp_name += f'{os.environ["SLURM_PROCID"]}.'
-    exp_name += f'{datetime.now().strftime("%Y%m%d_%H%M%S")}'
-
+    exp_name = f'{env_name}_{agent_name}_sd{seed:03d}'
     return exp_name
 
 
@@ -78,12 +71,13 @@ def setup_wandb(
         group=group,
         dir=wandb_output_dir,
         name=name,
+        reinit="finish_previous",
         settings=wandb.Settings(
             start_method='thread',
-            _disable_stats=False,
+            _disable_stats=True,
         ),
         mode=mode,
-        save_code=True,
+        save_code=False,
     )
 
     run = wandb.init(**init_kwargs)

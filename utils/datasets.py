@@ -178,9 +178,8 @@ class GCDataset:
 
     Attributes:
         dataset: Dataset object.
-        config: Configuration dictionary.
-        preprocess_frame_stack: Whether to preprocess frame stacks. If False, frame stacks are computed on-the-fly. This
-            saves memory but may slow down training.
+        config: Any
+        preprocess_frame_stack: bool = True
     """
 
     dataset: Dataset
@@ -319,7 +318,7 @@ class GCDataset:
         crop_froms = np.concatenate([crop_froms, np.zeros((batch_size, 1), dtype=np.int64)], axis=1)
         for key in keys:
             batch[key] = jax.tree_util.tree_map(
-                lambda arr: np.array(batched_random_crop(arr, crop_froms, padding)) if len(arr.shape) == 4 else arr,
+                lambda arr: batched_random_crop(arr, crop_froms, padding) if len(arr.shape) == 4 else arr,
                 batch[key],
             )
 
@@ -363,6 +362,8 @@ class HGCDataset(GCDataset):
     additional key from the config:
     - subgoal_steps: Subgoal steps (i.e., the number of steps to reach the low-level goal).
     """
+
+    subgoal_steps: int = 1
 
     def sample(self, batch_size, idxs=None, evaluation=False):
         """Sample a batch of transitions with goals.

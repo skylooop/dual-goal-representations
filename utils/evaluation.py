@@ -2,7 +2,7 @@ from collections import defaultdict
 
 import jax
 import numpy as np
-from tqdm import trange
+from tqdm.auto import tqdm
 
 
 def supply_rng(f, rng=jax.random.PRNGKey(0)):
@@ -65,12 +65,18 @@ def evaluate(
     Returns:
         A tuple containing the statistics, trajectories, and rendered videos.
     """
-    actor_fn = supply_rng(agent.sample_actions, rng=jax.random.PRNGKey(np.random.randint(0, 2**32)))
+    key = jax.random.PRNGKey(np.random.randint(0, 2**32))
+
+    @jax.jit
+    def actor_fn(*args, key=jax.random.PRNGKey(np.random.randint(0, 2**32)), **kwargs):
+        key, subkey = jax.random.split(key)
+        return agent.sample_actions(*args, **kwargs, seed=subkey), key
+
     trajs = []
     stats = defaultdict(list)
 
     renders = []
-    for i in trange(num_eval_episodes + num_video_episodes):
+    for i in tqdm(range(num_eval_episodes + num_video_episodes), desc='Episode', colour='red', position=2, leave=False):
         traj = defaultdict(list)
         should_render = i >= num_eval_episodes
 
@@ -86,7 +92,7 @@ def evaluate(
         step = 0
         render = []
         while not done:
-            action = actor_fn(observations=observation, goals=goal, temperature=eval_temperature)
+            action, key = actor_fn(observations=observation, goals=goal, temperature=eval_temperature, key=key)
             action = np.array(action)
             if not config.get('discrete'):
                 if eval_gaussian is not None:

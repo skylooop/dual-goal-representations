@@ -4,6 +4,7 @@ from agents.crl.dual import CRLDualAgent
 from agents.crl.tra import CRLTRAAgent
 from agents.crl.vib import CRLVIBAgent
 from agents.crl.vip import CRLVIPAgent
+from agents.daf.dual import DAFDualAgent
 from agents.gcfbc.original import GCFBCAgent
 from agents.gcfbc.byol import GCFBCBYOLAgent
 from agents.gcfbc.dual import GCFBCDualAgent
@@ -31,6 +32,7 @@ agents = dict(
     gcivl_dual_vis=GCIVLVisualDualAgent,
     crl_dual=CRLDualAgent,
     gcfbc_dual=GCFBCDualAgent,
+    daf_dual=DAFDualAgent,
     # VIB agents.
     gcivl_vib=GCIVLVIBAgent,
     gcivl_vib_vis=GCIVLVisualVIBAgent,

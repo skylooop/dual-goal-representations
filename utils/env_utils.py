@@ -77,7 +77,7 @@ class FrameStackWrapper(gymnasium.Wrapper):
 
 
 def make_env_and_datasets(dataset_name, frame_stack=None):
-    """Make OGBench environment and datasets.
+    """Make environment and datasets.
 
     Args:
         dataset_name: Name of the dataset.
@@ -86,10 +86,21 @@ def make_env_and_datasets(dataset_name, frame_stack=None):
     Returns:
         A tuple of the environment, training dataset, and validation dataset.
     """
-    # Use compact dataset to save memory.
-    env, train_dataset, val_dataset = ogbench.make_env_and_datasets(dataset_name, compact_dataset=True)
-    train_dataset = Dataset.create(**train_dataset)
-    val_dataset = Dataset.create(**val_dataset)
+    if dataset_name.startswith('t_junction'):
+        # T-junction environment — load pre-collected dataset.
+        import t_junction_env  # noqa: F401 — triggers gymnasium.register
+        env = gymnasium.make(dataset_name)
+        env = EpisodeMonitor(env)
+
+        data_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 't_junction_data.npz')
+        raw = dict(np.load(data_path))
+        train_dataset = Dataset.create(**raw)
+        val_dataset = None
+    else:
+        # Use compact dataset to save memory.
+        env, train_dataset, val_dataset = ogbench.make_env_and_datasets(dataset_name, compact_dataset=True)
+        train_dataset = Dataset.create(**train_dataset)
+        val_dataset = Dataset.create(**val_dataset)
 
     if frame_stack is not None:
         env = FrameStackWrapper(env, frame_stack)
@@ -97,3 +108,4 @@ def make_env_and_datasets(dataset_name, frame_stack=None):
     env.reset()
 
     return env, train_dataset, val_dataset
+

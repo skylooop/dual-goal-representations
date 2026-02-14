@@ -3,8 +3,12 @@ dist/
 *.py[cod]
 *$py.class
 *.egg-info/
+.venv/
 .DS_Store
 .idea/
 .ruff_cache/
+wandb/
 exp/
 *.Identifier
+results/
+**.npz
