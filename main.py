@@ -14,7 +14,6 @@ flags.DEFINE_bool('disable_jit', False, 'Whether to disable JIT compilation.')
 import json
 import os
 import random
-import time
 from collections import defaultdict
 
 import jax
@@ -48,7 +47,7 @@ flags.DEFINE_string('wandb_mode', 'online', 'Wandb mode.')
 # TRAIN HYPERS
 flags.DEFINE_integer('train_steps', 1000000, 'Number of training steps.')
 flags.DEFINE_integer('log_interval', 10_000, 'Logging interval.')
-flags.DEFINE_integer('eval_interval', 50_000, 'Evaluation interval.')
+flags.DEFINE_integer('eval_interval', 100_000, 'Evaluation interval.')
 flags.DEFINE_integer('save_interval', 1000000, 'Saving interval.')
 
 # EVAL HYPERS
@@ -116,8 +115,6 @@ def main():
     # Train agent.
     train_logger = CsvLogger(os.path.join(FLAGS.save_dir, 'train.csv'))
     eval_logger = CsvLogger(os.path.join(FLAGS.save_dir, 'eval.csv'))
-    first_time = time.time()
-    last_time = time.time()
 
     # Prefetch: High-speed host sampling + Async staging
     import threading, queue
@@ -150,9 +147,6 @@ def main():
                 val_batch = val_dataset.sample(config['batch_size'])
                 _, val_info = agent.total_loss(val_batch, grad_params=None)
                 train_metrics.update({f'validation/{k}': v for k, v in val_info.items()})
-            train_metrics['time/epoch_time'] = (time.time() - last_time) / FLAGS.log_interval
-            train_metrics['time/total_time'] = time.time() - first_time
-            last_time = time.time()
             wandb.log(train_metrics, step=i)
             train_logger.log(train_metrics, step=i)
 
