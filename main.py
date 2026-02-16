@@ -42,15 +42,16 @@ flags.DEFINE_string('save_dir', 'results/', 'Save directory.')
 flags.DEFINE_string('restore_path', None, 'Restore path.')
 flags.DEFINE_integer('restore_epoch', None, 'Restore epoch.')
 flags.DEFINE_string('wandb_mode', 'online', 'Wandb mode.')
+
 # TRAIN HYPERS
 flags.DEFINE_integer('train_steps', 1000000, 'Number of training steps.')
 flags.DEFINE_integer('log_interval', 10_000, 'Logging interval.')
-flags.DEFINE_integer('eval_interval', 100_000, 'Evaluation interval.')
-flags.DEFINE_integer('save_interval', 1_000, 'Saving interval.')
+flags.DEFINE_integer('eval_interval', 200_000, 'Evaluation interval.')
+flags.DEFINE_integer('save_interval', 500_000, 'Saving interval.')
 
 # EVAL HYPERS
 flags.DEFINE_integer('eval_tasks', None, 'Number of tasks to evaluate (None for all).')
-flags.DEFINE_integer('eval_episodes', 25, 'Number of episodes for each task.')
+flags.DEFINE_integer('eval_episodes', 30, 'Number of episodes for each task.')
 flags.DEFINE_float('eval_temperature', 0.0, 'Actor temperature for evaluation.')
 flags.DEFINE_float('eval_gaussian', None, 'Action Gaussian noise for evaluation.')
 flags.DEFINE_float('eval_goal_gaussian', None, 'Goal Gaussian noise for evaluation.')
@@ -151,50 +152,50 @@ def main():
             train_logger.log(train_metrics, step=i)
 
         # Evaluate agent.
-        # if i == 1 or i % FLAGS.eval_interval == 0:
-        #     if FLAGS.eval_on_cpu:
-        #         eval_agent = jax.device_put(agent, device=jax.devices('cpu')[0])
-        #     else:
-        #         eval_agent = agent
-        #     renders = []
-        #     eval_metrics = {}
-        #     overall_metrics = defaultdict(list)
-        #     task_infos = env.unwrapped.task_infos if hasattr(env.unwrapped, 'task_infos') else env.task_infos
-        #     num_tasks = FLAGS.eval_tasks if FLAGS.eval_tasks is not None else len(task_infos)
+        if i == 1 or i % FLAGS.eval_interval == 0:
+            if FLAGS.eval_on_cpu:
+                eval_agent = jax.device_put(agent, device=jax.devices('cpu')[0])
+            else:
+                eval_agent = agent
+            renders = []
+            eval_metrics = {}
+            overall_metrics = defaultdict(list)
+            task_infos = env.unwrapped.task_infos if hasattr(env.unwrapped, 'task_infos') else env.task_infos
+            num_tasks = FLAGS.eval_tasks if FLAGS.eval_tasks is not None else len(task_infos)
             
-        #     for task_id in tqdm(range(1, num_tasks + 1), desc='Evaluating',
-        #                         leave=False, dynamic_ncols=True, colour='yellow', position=1):
-        #         task_name = task_infos[task_id - 1]['task_name']
-        #         eval_info, trajs, cur_renders = evaluate(
-        #             agent=eval_agent,
-        #             env=env,
-        #             task_id=task_id,
-        #             config=config,
-        #             num_eval_episodes=FLAGS.eval_episodes,
-        #             num_video_episodes=FLAGS.video_episodes,
-        #             video_frame_skip=FLAGS.video_frame_skip,
-        #             eval_temperature=FLAGS.eval_temperature,
-        #             eval_gaussian=FLAGS.eval_gaussian,
-        #             eval_goal_gaussian=FLAGS.eval_goal_gaussian,
-        #             diff=diff,
-        #         )
-        #         renders.extend(cur_renders)
-        #         metric_names = ['success']
-        #         eval_metrics.update(
-        #             {f'evaluation/{task_name}_{k}': v for k, v in eval_info.items() if k in metric_names}
-        #         )
-        #         for k, v in eval_info.items():
-        #             if k in metric_names:
-        #                 overall_metrics[k].append(v)
-        #     for k, v in overall_metrics.items():
-        #         eval_metrics[f'evaluation/overall_{k}'] = np.mean(v)
+            for task_id in tqdm(range(1, num_tasks + 1), desc='Evaluating',
+                                leave=False, dynamic_ncols=True, colour='yellow', position=1):
+                task_name = task_infos[task_id - 1]['task_name']
+                eval_info, trajs, cur_renders = evaluate(
+                    agent=eval_agent,
+                    env=env,
+                    task_id=task_id,
+                    config=config,
+                    num_eval_episodes=FLAGS.eval_episodes,
+                    num_video_episodes=FLAGS.video_episodes,
+                    video_frame_skip=FLAGS.video_frame_skip,
+                    eval_temperature=FLAGS.eval_temperature,
+                    eval_gaussian=FLAGS.eval_gaussian,
+                    eval_goal_gaussian=FLAGS.eval_goal_gaussian,
+                    diff=diff,
+                )
+                renders.extend(cur_renders)
+                metric_names = ['success']
+                eval_metrics.update(
+                    {f'evaluation/{task_name}_{k}': v for k, v in eval_info.items() if k in metric_names}
+                )
+                for k, v in eval_info.items():
+                    if k in metric_names:
+                        overall_metrics[k].append(v)
+            for k, v in overall_metrics.items():
+                eval_metrics[f'evaluation/overall_{k}'] = np.mean(v)
 
-        #     if FLAGS.video_episodes > 0:
-        #         video = get_wandb_video(renders=renders, n_cols=num_tasks)
-        #         eval_metrics['video'] = video
+            if FLAGS.video_episodes > 0:
+                video = get_wandb_video(renders=renders, n_cols=num_tasks)
+                eval_metrics['video'] = video
 
-        #     wandb.log(eval_metrics, step=i)
-        #     eval_logger.log(eval_metrics, step=i)
+            wandb.log(eval_metrics, step=i)
+            eval_logger.log(eval_metrics, step=i)
 
         if i % FLAGS.save_interval == 0:
             save_agent(agent, FLAGS.save_dir, i)
