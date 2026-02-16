@@ -15,7 +15,7 @@ import json
 import os
 import random
 from collections import defaultdict
-
+import threading, queue
 import jax
 import numpy as np
 from tqdm.auto import tqdm
@@ -32,8 +32,6 @@ from utils.flax_utils import restore_agent, save_agent
 from utils.log_utils import CsvLogger, get_exp_name, get_flag_dict,\
     get_wandb_video, setup_wandb
 
-FLAGS = flags.FLAGS
-
 # WANDB & LOGGING
 flags.DEFINE_string('run_group', 'Debug', 'Run group.')
 
@@ -48,7 +46,7 @@ flags.DEFINE_string('wandb_mode', 'online', 'Wandb mode.')
 flags.DEFINE_integer('train_steps', 1000000, 'Number of training steps.')
 flags.DEFINE_integer('log_interval', 10_000, 'Logging interval.')
 flags.DEFINE_integer('eval_interval', 100_000, 'Evaluation interval.')
-flags.DEFINE_integer('save_interval', 1000000, 'Saving interval.')
+flags.DEFINE_integer('save_interval', 1_000, 'Saving interval.')
 
 # EVAL HYPERS
 flags.DEFINE_integer('eval_tasks', None, 'Number of tasks to evaluate (None for all).')
@@ -62,10 +60,10 @@ flags.DEFINE_integer('eval_on_cpu', 1, 'Whether to evaluate on CPU.')
 
 config_flags.DEFINE_config_file('agent', 'agents/crl/dual.py', lock_config=False)
 
-
 def main():
     # Set up logger.
     config = FLAGS.agent
+
     exp_name = get_exp_name(FLAGS.env_name, config['agent_name'], FLAGS.seed)
     setup_wandb(project='dual_goal_reprs-Research', mode=FLAGS.wandb_mode,
                 group=FLAGS.agent.agent_name, name=exp_name)
@@ -73,6 +71,8 @@ def main():
     FLAGS.save_dir = os.path.join(FLAGS.save_dir, wandb.run.project,
                                   FLAGS.agent.agent_name, exp_name)
     os.makedirs(FLAGS.save_dir, exist_ok=True)
+
+    # Ckpt manager handled within save_agent/restore_agent but let's keep save_dir setup
     flag_dict = get_flag_dict()
     with open(os.path.join(FLAGS.save_dir, 'flags.json'), 'w') as f:
         json.dump(flag_dict, f)
@@ -117,7 +117,6 @@ def main():
     eval_logger = CsvLogger(os.path.join(FLAGS.save_dir, 'eval.csv'))
 
     # Prefetch: High-speed host sampling + Async staging
-    import threading, queue
     prefetch_queue = queue.Queue(maxsize=4)
 
     def _prefetch_worker():
@@ -135,7 +134,8 @@ def main():
     prefetch_thread = threading.Thread(target=_prefetch_worker, daemon=True)
     prefetch_thread.start()
 
-    for i in tqdm(range(1, FLAGS.train_steps + 1), smoothing=0.1, dynamic_ncols=True, desc='Training', colour='green', leave=True, position=0):
+    for i in tqdm(range(1, FLAGS.train_steps + 1), smoothing=0.1,
+                        dynamic_ncols=True, desc='Training', colour='green', leave=True, position=0):
         # Update agent.
         batch = prefetch_queue.get()
         agent, update_info = agent.update(batch)
@@ -151,52 +151,51 @@ def main():
             train_logger.log(train_metrics, step=i)
 
         # Evaluate agent.
-        if i == 1 or i % FLAGS.eval_interval == 0:
-            if FLAGS.eval_on_cpu:
-                eval_agent = jax.device_put(agent, device=jax.devices('cpu')[0])
-            else:
-                eval_agent = agent
-            renders = []
-            eval_metrics = {}
-            overall_metrics = defaultdict(list)
-            task_infos = env.unwrapped.task_infos if hasattr(env.unwrapped, 'task_infos') else env.task_infos
-            num_tasks = FLAGS.eval_tasks if FLAGS.eval_tasks is not None else len(task_infos)
+        # if i == 1 or i % FLAGS.eval_interval == 0:
+        #     if FLAGS.eval_on_cpu:
+        #         eval_agent = jax.device_put(agent, device=jax.devices('cpu')[0])
+        #     else:
+        #         eval_agent = agent
+        #     renders = []
+        #     eval_metrics = {}
+        #     overall_metrics = defaultdict(list)
+        #     task_infos = env.unwrapped.task_infos if hasattr(env.unwrapped, 'task_infos') else env.task_infos
+        #     num_tasks = FLAGS.eval_tasks if FLAGS.eval_tasks is not None else len(task_infos)
             
-            for task_id in tqdm(range(1, num_tasks + 1), desc='Evaluating',
-                                leave=False, dynamic_ncols=True, colour='yellow', position=1):
-                task_name = task_infos[task_id - 1]['task_name']
-                eval_info, trajs, cur_renders = evaluate(
-                    agent=eval_agent,
-                    env=env,
-                    task_id=task_id,
-                    config=config,
-                    num_eval_episodes=FLAGS.eval_episodes,
-                    num_video_episodes=FLAGS.video_episodes,
-                    video_frame_skip=FLAGS.video_frame_skip,
-                    eval_temperature=FLAGS.eval_temperature,
-                    eval_gaussian=FLAGS.eval_gaussian,
-                    eval_goal_gaussian=FLAGS.eval_goal_gaussian,
-                    diff=diff,
-                )
-                renders.extend(cur_renders)
-                metric_names = ['success']
-                eval_metrics.update(
-                    {f'evaluation/{task_name}_{k}': v for k, v in eval_info.items() if k in metric_names}
-                )
-                for k, v in eval_info.items():
-                    if k in metric_names:
-                        overall_metrics[k].append(v)
-            for k, v in overall_metrics.items():
-                eval_metrics[f'evaluation/overall_{k}'] = np.mean(v)
+        #     for task_id in tqdm(range(1, num_tasks + 1), desc='Evaluating',
+        #                         leave=False, dynamic_ncols=True, colour='yellow', position=1):
+        #         task_name = task_infos[task_id - 1]['task_name']
+        #         eval_info, trajs, cur_renders = evaluate(
+        #             agent=eval_agent,
+        #             env=env,
+        #             task_id=task_id,
+        #             config=config,
+        #             num_eval_episodes=FLAGS.eval_episodes,
+        #             num_video_episodes=FLAGS.video_episodes,
+        #             video_frame_skip=FLAGS.video_frame_skip,
+        #             eval_temperature=FLAGS.eval_temperature,
+        #             eval_gaussian=FLAGS.eval_gaussian,
+        #             eval_goal_gaussian=FLAGS.eval_goal_gaussian,
+        #             diff=diff,
+        #         )
+        #         renders.extend(cur_renders)
+        #         metric_names = ['success']
+        #         eval_metrics.update(
+        #             {f'evaluation/{task_name}_{k}': v for k, v in eval_info.items() if k in metric_names}
+        #         )
+        #         for k, v in eval_info.items():
+        #             if k in metric_names:
+        #                 overall_metrics[k].append(v)
+        #     for k, v in overall_metrics.items():
+        #         eval_metrics[f'evaluation/overall_{k}'] = np.mean(v)
 
-            if FLAGS.video_episodes > 0:
-                video = get_wandb_video(renders=renders, n_cols=num_tasks)
-                eval_metrics['video'] = video
+        #     if FLAGS.video_episodes > 0:
+        #         video = get_wandb_video(renders=renders, n_cols=num_tasks)
+        #         eval_metrics['video'] = video
 
-            wandb.log(eval_metrics, step=i)
-            eval_logger.log(eval_metrics, step=i)
+        #     wandb.log(eval_metrics, step=i)
+        #     eval_logger.log(eval_metrics, step=i)
 
-        # Save agent.
         if i % FLAGS.save_interval == 0:
             save_agent(agent, FLAGS.save_dir, i)
 

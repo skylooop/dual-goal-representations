@@ -9,6 +9,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import optax
+import orbax.checkpoint as ocp
 
 nonpytree_field = functools.partial(flax.struct.field, pytree_node=False)
 
@@ -158,45 +159,43 @@ class TrainState(flax.struct.PyTreeNode):
 
         return self.apply_gradients(grads=grads), info
 
-
-def save_agent(agent, save_dir, epoch):
-    """Save the agent to a file.
-
-    Args:
-        agent: Agent.
-        save_dir: Directory to save the agent.
-        epoch: Epoch number.
-    """
-
-    save_dict = dict(
-        agent=flax.serialization.to_state_dict(agent),
-    )
-    save_path = os.path.join(save_dir, f'params_{epoch}.pkl')
-    with open(save_path, 'wb') as f:
-        pickle.dump(save_dict, f)
-
-    print(f'Saved to {save_path}')
+def save_agent(agent: flax.struct.PyTreeNode, save_dir: str, step: int):
+    """Save the agent state using Orbax (modern API, orbax-checkpoint >= 0.6)."""
+    ckpt_dir = os.path.abspath(os.path.join(save_dir, 'checkpoints'))
+    with ocp.CheckpointManager(
+        ckpt_dir,
+        options=ocp.CheckpointManagerOptions(max_to_keep=5, create=True),
+    ) as checkpoint_manager:
+        checkpoint_manager.save(
+            step,
+            args=ocp.args.StandardSave(agent),
+        )
+        checkpoint_manager.wait_until_finished()
+    print(f"Saved agent at step {step} to {ckpt_dir}")
 
 
-def restore_agent(agent, restore_path, restore_epoch):
-    """Restore the agent from a file.
+def restore_agent(agent: flax.struct.PyTreeNode, restore_path: str, step: int = None) -> flax.struct.PyTreeNode:
+    """Restore the agent state using Orbax (modern API, orbax-checkpoint >= 0.6).
 
     Args:
-        agent: Agent.
-        restore_path: Path to the directory containing the saved agent.
-        restore_epoch: Epoch number.
+        agent: An abstract agent pytree (same structure as the saved one) used as
+               the restore target so Orbax knows the expected shape/dtype.
+        restore_path: Path to the checkpoint directory (the 'checkpoints' folder).
+        step: Checkpoint step to restore. If None, restores the latest.
     """
-    candidates = glob.glob(restore_path)
+    restore_path = os.path.abspath(restore_path)
+    with ocp.CheckpointManager(
+        restore_path,
+        options=ocp.CheckpointManagerOptions(create=False),
+    ) as checkpoint_manager:
+        if step is None:
+            step = checkpoint_manager.latest_step()
+            if step is None:
+                raise ValueError(f"No checkpoints found in {restore_path}")
 
-    assert len(candidates) == 1, f'Found {len(candidates)} candidates: {candidates}'
-
-    restore_path = candidates[0] + f'/params_{restore_epoch}.pkl'
-
-    with open(restore_path, 'rb') as f:
-        load_dict = pickle.load(f)
-
-    agent = flax.serialization.from_state_dict(agent, load_dict['agent'])
-
-    print(f'Restored from {restore_path}')
-
-    return agent
+        restored = checkpoint_manager.restore(
+            step,
+            args=ocp.args.StandardRestore(agent),
+        )
+    print(f"Restored agent from step {step} in {restore_path}")
+    return restored
