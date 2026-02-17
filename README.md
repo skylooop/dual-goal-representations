@@ -33,3 +33,25 @@ python main.py --env_name=scene-play-v0 --agent=agents/gcivl/state/vib.py --agen
 # GCIVL with VIP representations
 python main.py --env_name=scene-play-v0 --agent=agents/gcivl/state/vip.py --agent.alpha=10.0 --agent.goalrep_dim=256 --agent.discount=0.99
 ```
+
+Evaluating agents with rliable:
+```shell
+# Agent 1
+uv run eval_trained.py \
+    --env_name=puzzle-3x3-play-v0 \
+    --agent=agents/crl/dual.py \
+    --restore_path=results/.../crl_dual/checkpoints --restore_epoch=31000
+
+# Agent 2
+uv run eval_trained.py \
+    --env_name=puzzle-3x3-play-v0 \
+    --agent=agents/gcfbc/dual.py \
+    --restore_path=results/.../gcfbc_dual/checkpoints --restore_epoch=50000
+```
+Comparing them:
+```shell
+uv run compare_agents.py \
+    --results_dirs eval_results/<crl_dir> eval_results/<gcfbc_dir> \
+    --labels "CRL-Dual" "GCFBC-Dual" \
+    --output_dir comparison_results/puzzle_3x3
+```

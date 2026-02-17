@@ -26,14 +26,14 @@ from ml_collections import config_flags
 
 FLAGS = flags.FLAGS
 
-# Agent config (same as main.py).
+# Agent config
 config_flags.DEFINE_config_file('agent', 'agents/crl/dual.py', lock_config=False)
 
 # General.
 flags.DEFINE_integer('seed', 0, 'Random seed.')
 flags.DEFINE_string('env_name', 'antmaze-large-navigate-v0', 'Environment (dataset) name.')
 flags.DEFINE_string('restore_path', None, 'Path to the checkpoint directory (required).', required=True)
-flags.DEFINE_integer('restore_epoch', None, 'Checkpoint step to restore (None for latest).')
+flags.DEFINE_integer('restore_epoch', 1000000, 'Checkpoint step to restore (None for latest).')
 
 # Eval hypers.
 flags.DEFINE_integer('eval_tasks', None, 'Number of tasks to evaluate (None for all).')
