@@ -8,21 +8,23 @@ import ml_collections
 import optax
 from utils.flax_utils import ModuleDict, TrainState, nonpytree_field
 from utils.dual import DualRepresentationValue
-from utils.networks import GCBilinearValue, GCValue, MLP
+from utils.networks import GCActor, GCBilinearValue, GCDiscreteActor, GCDiscreteBilinearCritic, GCValue, MLP
 
 
 class DAFDualAgent(flax.struct.PyTreeNode):
     """Dual Advantage Fields (DAF) agent.
 
-    Uses a dual goal representation to extract a policy directly from the
-    learned embeddings, without training a separate actor network.
+    Uses a dual goal representation to extract a policy from the learned
+    embeddings.
 
     The key idea:
     1. Learn phi(s) and psi(g) such that V(s,g) = phi(s)^T psi(g) / sqrt(d).
     2. Learn u_xi(s,a) that predicts the expected latent displacement:
        u_xi(s,a) ≈ E[gamma * phi(s') - phi(s) | s, a].
     3. Score actions by alignment: A_hat(s,a,g) = u_xi(s,a)^T psi(g).
-    4. Act greedily: pi(s,g) = argmax_a A_hat(s,a,g).
+
+    For discrete actions: enumerate all actions and pick argmax (original DAF).
+    For continuous actions: train a DDPG+BC actor using the contrastive critic.
     """
 
     rng: Any
@@ -150,6 +152,38 @@ class DAFDualAgent(flax.struct.PyTreeNode):
             'ae_target_norm': jnp.mean(jnp.linalg.norm(target, axis=-1)),
         }
 
+    def actor_loss(self, batch, grad_params, rng=None):
+        """Compute the DDPG+BC actor loss (continuous actions only)."""
+        assert not self.config['discrete']
+        goal_reps = self.network.select('rep_value')(batch['actor_goals'])
+
+        dist = self.network.select('actor')(batch['observations'], goal_reps, params=grad_params)
+        if self.config['const_std']:
+            q_actions = jnp.clip(dist.mode(), -1, 1)
+        else:
+            q_actions = jnp.clip(dist.sample(seed=rng), -1, 1)
+        q1, q2 = self.network.select('critic')(batch['observations'], goal_reps, q_actions)
+        q = jnp.minimum(q1, q2)
+
+        # Normalize Q values by the absolute mean to make the loss scale invariant.
+        q_loss = -q.mean() / jax.lax.stop_gradient(jnp.abs(q).mean() + 1e-6)
+        log_prob = dist.log_prob(batch['actions'])
+
+        bc_loss = -(self.config['alpha'] * log_prob).mean()
+
+        actor_loss = q_loss + bc_loss
+
+        return actor_loss, {
+            'actor_loss': actor_loss,
+            'q_loss': q_loss,
+            'bc_loss': bc_loss,
+            'q_mean': q.mean(),
+            'q_abs_mean': jnp.abs(q).mean(),
+            'bc_log_prob': log_prob.mean(),
+            'mse': jnp.mean((dist.mode() - batch['actions']) ** 2),
+            'std': jnp.mean(dist.scale_diag),
+        }
+
     @jax.jit
     def total_loss(self, batch, grad_params, rng=None):
         """Compute the total loss."""
@@ -169,6 +203,14 @@ class DAFDualAgent(flax.struct.PyTreeNode):
             info[f'ae/{k}'] = v
 
         loss = critic_loss + rep_loss + ae_loss
+
+        if not self.config['discrete']:
+            rng, actor_rng = jax.random.split(rng)
+            actor_loss, actor_info = self.actor_loss(batch, grad_params, actor_rng)
+            for k, v in actor_info.items():
+                info[f'actor/{k}'] = v
+            loss = loss + actor_loss
+
         return loss, info
 
     def target_update(self, network, module_name):
@@ -201,50 +243,49 @@ class DAFDualAgent(flax.struct.PyTreeNode):
         seed=None,
         temperature=1.0,
     ):
-        """DAF policy: score each action by alignment and pick the best.
+        """Sample actions.
 
-        For discrete actions, we enumerate all actions and pick argmax.
+        For discrete actions: enumerate all actions, score by alignment, pick argmax/Boltzmann.
+        For continuous actions: sample from the learned actor.
         """
-        # Get psi(g) — the goal embedding.
-        psi_g = self.network.select('rep_value')(goals)  # (batch, goalrep_dim)
+        goal_reps = self.network.select('rep_value')(goals)
 
-        # Score each discrete action.
-        n_actions = self.config['action_dim']
-        batch_shape = observations.shape[:-1]
-        batch_size = 1
-        for s in batch_shape:
-            batch_size *= s
+        if self.config['discrete']:
+            # Discrete DAF: score by alignment u_xi(s,a)^T psi(g).
+            n_actions = self.config['action_dim']
+            batch_shape = observations.shape[:-1]
+            batch_size = 1
+            for s in batch_shape:
+                batch_size *= s
 
-        obs_flat = observations.reshape(batch_size, -1)
-        psi_flat = psi_g.reshape(batch_size, -1)
+            obs_flat = observations.reshape(batch_size, -1)
+            psi_flat = goal_reps.reshape(batch_size, -1)
 
-        # Build one-hot actions for all possible actions.
-        all_actions = jnp.eye(n_actions)  # (n_actions, n_actions)
+            all_actions = jnp.eye(n_actions)
 
-        def score_action(a_onehot):
-            # Broadcast to batch: (batch, action_dim)
-            a_batch = jnp.broadcast_to(a_onehot, (batch_size, n_actions))
-            u = self.network.select('action_effect')(obs_flat, a_batch)  # (batch, latent_dim)
-            # Alignment score: u^T psi(g)
-            score = (u * psi_flat).sum(axis=-1)  # (batch,)
-            return score
+            def score_action(a_onehot):
+                a_batch = jnp.broadcast_to(a_onehot, (batch_size, n_actions))
+                u = self.network.select('action_effect')(obs_flat, a_batch)
+                score = (u * psi_flat).sum(axis=-1)
+                return score
 
-        # Score all actions: (n_actions, batch_size)
-        scores = jax.vmap(score_action)(all_actions)
-        # Transpose to (batch_size, n_actions)
-        scores = scores.T
+            scores = jax.vmap(score_action)(all_actions).T
 
-        # Use jax.lax.cond to avoid TracerBoolConversionError inside jit.
-        def greedy_fn(_):
-            return jnp.argmax(scores, axis=-1)
+            def greedy_fn(_):
+                return jnp.argmax(scores, axis=-1)
 
-        def boltzmann_fn(_):
-            logits = scores / jnp.maximum(temperature, 1e-8)
-            return jax.random.categorical(seed, logits, axis=-1)
+            def boltzmann_fn(_):
+                logits = scores / jnp.maximum(temperature, 1e-8)
+                return jax.random.categorical(seed, logits, axis=-1)
 
-        actions = jax.lax.cond(temperature == 0.0, greedy_fn, boltzmann_fn, None)
-
-        return actions.reshape(batch_shape)
+            actions = jax.lax.cond(temperature == 0.0, greedy_fn, boltzmann_fn, None)
+            return actions.reshape(batch_shape)
+        else:
+            # Continuous: use the learned actor.
+            dist = self.network.select('actor')(observations, goal_reps, temperature=temperature)
+            actions = dist.sample(seed=seed)
+            actions = jnp.clip(actions, -1, 1)
+            return actions
 
     @classmethod
     def create(
@@ -260,16 +301,29 @@ class DAFDualAgent(flax.struct.PyTreeNode):
         rng, init_rng = jax.random.split(rng, 2)
 
         ex_goals_rep = jnp.zeros(shape=(1, config['goalrep_dim']))
-        action_dim = ex_actions.shape[-1]
+        if config['discrete']:
+            action_dim = ex_actions.max() + 1
+        else:
+            action_dim = ex_actions.shape[-1]
 
         # Bilinear critic (contrastive).
-        critic_def = GCBilinearValue(
-            hidden_dims=config['value_hidden_dims'],
-            latent_dim=config['latent_dim'],
-            layer_norm=config['layer_norm'],
-            ensemble=True,
-            value_exp=False,
-        )
+        if config['discrete']:
+            critic_def = GCDiscreteBilinearCritic(
+                hidden_dims=config['value_hidden_dims'],
+                latent_dim=config['latent_dim'],
+                layer_norm=config['layer_norm'],
+                ensemble=True,
+                value_exp=False,
+                action_dim=action_dim,
+            )
+        else:
+            critic_def = GCBilinearValue(
+                hidden_dims=config['value_hidden_dims'],
+                latent_dim=config['latent_dim'],
+                layer_norm=config['layer_norm'],
+                ensemble=True,
+                value_exp=False,
+            )
 
         # Dual representation value.
         rep_value_def = DualRepresentationValue(type=config['rep_type'])(
@@ -285,12 +339,26 @@ class DAFDualAgent(flax.struct.PyTreeNode):
             ensemble=True,
         )
 
-        # Action-effect head: MLP that takes (s, a_onehot) -> latent_dim.
+        # Action-effect head: MLP that takes (s, a) -> latent_dim.
         action_effect_def = ActionEffectMLP(
             hidden_dims=config['ae_hidden_dims'],
             latent_dim=config['latent_dim'],
             layer_norm=config['layer_norm'],
         )
+
+        # Actor network (for continuous actions).
+        if config['discrete']:
+            actor_def = GCDiscreteActor(
+                hidden_dims=config['actor_hidden_dims'],
+                action_dim=action_dim,
+            )
+        else:
+            actor_def = GCActor(
+                hidden_dims=config['actor_hidden_dims'],
+                action_dim=action_dim,
+                state_dependent_std=False,
+                const_std=config['const_std'],
+            )
 
         network_info = dict(
             rep_value=(rep_value_def, (ex_observations, ex_observations)),
@@ -298,6 +366,7 @@ class DAFDualAgent(flax.struct.PyTreeNode):
             target_rep_critic=(copy.deepcopy(rep_critic_def), (ex_observations, ex_observations, ex_actions)),
             critic=(critic_def, (ex_observations, ex_goals_rep, ex_actions)),
             action_effect=(action_effect_def, (ex_observations, ex_actions)),
+            actor=(actor_def, (ex_observations, ex_goals_rep)),
         )
         networks = {k: v[0] for k, v in network_info.items()}
         network_args = {k: v[1] for k, v in network_info.items()}
@@ -340,16 +409,19 @@ def get_config():
             agent_name='daf_dual',
             lr=3e-4,
             batch_size=1024,
-            rep_hidden_dims=(256, 256),
-            value_hidden_dims=(256, 256),
-            ae_hidden_dims=(256, 256),
-            latent_dim=64,
+            rep_hidden_dims=(512, 512, 512),
+            actor_hidden_dims=(512, 512, 512),
+            value_hidden_dims=(512, 512, 512),
+            ae_hidden_dims=(512, 512, 512),
+            latent_dim=512,
             layer_norm=True,
             discount=0.99,
             tau=0.005,
-            discrete=True,
+            alpha=0.1,  # BC coefficient in DDPG+BC.
+            const_std=True,  # Whether to use constant standard deviation for the actor.
+            discrete=False,  # Whether the action space is discrete.
             rep_expectile=0.7,
-            goalrep_dim=64,
+            goalrep_dim=256,
             rep_type='bilinear',
             action_dim=ml_collections.config_dict.placeholder(int),
             # Dataset hyperparameters.

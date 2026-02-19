@@ -41,8 +41,6 @@ flags.DEFINE_string('env_name', 'antmaze-large-navigate-v0', 'Environment (datas
 flags.DEFINE_string('save_dir', 'results/', 'Save directory.')
 flags.DEFINE_string('restore_path', None, 'Restore path.')
 flags.DEFINE_integer('restore_epoch', None, 'Restore epoch.')
-flags.DEFINE_string('wandb_mode', 'online', 'Wandb mode.')
-
 # TRAIN HYPERS
 flags.DEFINE_integer('train_steps', 1000000, 'Number of training steps.')
 flags.DEFINE_integer('log_interval', 10_000, 'Logging interval.')
@@ -66,7 +64,7 @@ def main():
     config = FLAGS.agent
 
     exp_name = get_exp_name(FLAGS.env_name, config['agent_name'], FLAGS.seed)
-    setup_wandb(project='dual_goal_reprs-Research', mode=FLAGS.wandb_mode,
+    setup_wandb(project='dual_goal_reprs-Research',
                 group=FLAGS.agent.agent_name, name=exp_name)
     
     FLAGS.save_dir = os.path.join(FLAGS.save_dir, wandb.run.project,

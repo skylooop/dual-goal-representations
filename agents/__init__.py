@@ -1,10 +1,15 @@
 from agents.crl.original import CRLAgent
 from agents.crl.byol import CRLBYOLAgent
 from agents.crl.dual import CRLDualAgent
+
+from agents.crl.dual_direct import CRLDualDirectAgent
+
 from agents.crl.tra import CRLTRAAgent
 from agents.crl.vib import CRLVIBAgent
 from agents.crl.vip import CRLVIPAgent
+
 from agents.daf.dual import DAFDualAgent
+
 from agents.gcfbc.original import GCFBCAgent
 from agents.gcfbc.byol import GCFBCBYOLAgent
 from agents.gcfbc.dual import GCFBCDualAgent
@@ -18,6 +23,9 @@ from agents.gcivl.pixel.tra import GCIVLVisualTRAAgent
 from agents.gcivl.pixel.vib import GCIVLVisualVIBAgent
 from agents.gcivl.pixel.vip import GCIVLVisualVIPAgent
 from agents.gcivl.state.dual import GCIVLDualAgent
+
+from agents.gcivl.state.dual_direct import GCIVLDualDirectAgent
+
 from agents.gcivl.state.byol import GCIVLBYOLAgent
 from agents.gcivl.state.tra import GCIVLTRAAgent
 from agents.gcivl.state.vib import GCIVLVIBAgent
@@ -29,8 +37,10 @@ agents = dict(
     gcivl=GCIVLAgent,
     # Dual representation agents.
     gcivl_dual=GCIVLDualAgent,
+    gcivl_dual_direct=GCIVLDualDirectAgent,
     gcivl_dual_vis=GCIVLVisualDualAgent,
     crl_dual=CRLDualAgent,
+    crl_dual_direct=CRLDualDirectAgent,
     gcfbc_dual=GCFBCDualAgent,
     daf_dual=DAFDualAgent,
     # VIB agents.
