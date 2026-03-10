@@ -3,6 +3,7 @@
 This file defines how an autonomous agent should run research in this repository.
 
 Goal: improve evaluation success rate across tasks in the given RL environment (experiment with antmaze-large-navigate-v0)
+Right now we are experimenting with just GCIVL : `agents/gcivl/original.py`
 
 ## Project structure (what to read, what to modify)
 
@@ -57,6 +58,7 @@ Out-of-scope / do not modify:
 5. Create a .md file in the current working branch that explains what is done, what idea is tried etc (all changes must be specified here).
 6. Find best way to show which branch achieved best success rate (either by creating a file (e.g results.tsv) and commiting to it results from different branches or any other good way). But I must see which changes and what score/results were obtained for each experiment branch.
 7. The code is being run on single RTX 4090
+8. For each experiment, there MUST BE a description of the idea that is being implemented
 
 ## Entry point and metric
 
