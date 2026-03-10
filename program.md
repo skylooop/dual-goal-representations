@@ -113,7 +113,9 @@ uv run python main.py \
   --agent=agents/crl/dual.py \
   --env_name=antmaze-large-navigate-v0 \
   --wandb_mode=offline
+  --eval_interval=50000
 ```
+Ensure that eval_interval=50000 and log_interval=20000
 
 You may pass additional CLI flags, but do not edit the train/eval hyperparameter definitions in `main.py`.
 
