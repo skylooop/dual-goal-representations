@@ -122,7 +122,7 @@ You may pass additional CLI flags, but do not edit the train/eval hyperparameter
 
 ## What to optimize
 
-Focus on new ideas and directions (not just obvious hyperparameter tuning). Prioritize ideas that can improve cross-task success quickly:
+Focus on new ideas and directions (not just obvious hyperparameter tuning). Try to push over boundaries and find interesting and correct approaches for experimenting. Prioritize ideas that can improve cross-task success quickly:
 
 - representation learning losses and weighting,
 - goal conditioning pathways,
