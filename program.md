@@ -54,13 +54,9 @@ Out-of-scope / do not modify:
    - `git checkout master`
    - `git checkout -b autoresearch/<tag>-baseline`
 4. Run one baseline experiment and record metrics.
-5. Initialize an untracked `results.tsv` file in repo root with header:
-
-```
-branch\tcommit\toverall_success\tmean_task_success\tstatus\tdescription
-```
-
-Do not commit `results.tsv`.
+5. Create a .md file in the current working branch that explains what is done, what idea is tried etc (all changes must be specified here).
+6. Find best way to show which branch achieved best success rate (either by creating a file (e.g results.tsv) and commiting to it results from different branches or any other good way). But I must see which changes and what score/results were obtained for each experiment branch.
+7. The code is being run on single RTX 4090
 
 ## Entry point and metric
 
@@ -92,22 +88,19 @@ Every experiment must run on a separate branch.
 
 ## Runtime budget policy
 
-Each experiment must satisfy BOTH:
+Each experiment must satisfy following:
 
-1. Hard wall-clock cap: 8 minutes maximum.
-2. Stop as soon as the first evaluation is completed.
+1. Stop as soon as the TWO evaluations are completed.
 
 Implementation rule:
 
 - Launch training in background.
-- Poll `eval.csv` under the current run directory.
-- As soon as `eval.csv` has at least one data row, terminate training gracefully.
-- If no evaluation is completed by 8 minutes, terminate and mark as failure.
+- Poll `eval.csv` in the corresponding results folder.
+- As soon as `eval.csv` has at least two data rows, terminate training gracefully.
 
 Notes:
 
 - This policy must be enforced externally (process control), without editing `main.py` hyperparameter definitions.
-- A run that exceeds 8 minutes or lacks first eval completion is `crash`/`invalid`.
 
 ## Experiment command
 
@@ -156,7 +149,7 @@ Status policy:
 
 - `keep`: strictly better `overall_success`, or equal `overall_success` with better `mean_task_success` and comparable complexity.
 - `discard`: valid run but not better.
-- `crash`: runtime failure, no first eval within 8 minutes, NaNs, or malformed outputs.
+- `crash`: runtime failure, NaNs (either at eval or train), or malformed outputs.
 
 ## Autonomous loop
 
@@ -166,10 +159,9 @@ Repeat until interrupted by user:
 2. Create new experiment branch from current best branch.
 3. Edit only allowed files.
 4. Commit.
-5. Run experiment under 8-minute/first-eval policy.
-6. Parse metrics from `eval.csv` (+ inspect `train.csv` for debugging only).
-7. Log in `results.tsv`.
-8. Keep or discard branch by metric policy.
+5. Parse metrics from `eval.csv` (+ inspect `train.csv` for debugging only).
+6. Log in `results.tsv`.
+7. Keep or discard branch by metric policy.
 
 Never ask for confirmation between iterations; continue autonomously.
 
