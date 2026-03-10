@@ -56,7 +56,7 @@ flags.DEFINE_string("wandb_mode", "offline", "Wandb mode.")
 
 # TRAIN HYPERS
 flags.DEFINE_integer("train_steps", 1000000, "Number of training steps.")
-flags.DEFINE_integer("log_interval", 5_000, "Logging interval.")
+flags.DEFINE_integer("log_interval", 20_000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 50_000, "Evaluation interval.")
 flags.DEFINE_integer("save_interval", 500_000, "Saving interval.")
 
