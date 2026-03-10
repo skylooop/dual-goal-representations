@@ -37,13 +37,13 @@ python main.py --env_name=scene-play-v0 --agent=agents/gcivl/state/vip.py --agen
 Evaluating agents with rliable:
 ```shell
 # Agent 1
-uv run eval_trained.py \
+uv run eval_pretrained.py \
     --env_name=puzzle-3x3-play-v0 \
     --agent=agents/crl/dual.py \
     --restore_path=results/.../crl_dual/checkpoints --restore_epoch=31000
 
 # Agent 2
-uv run eval_trained.py \
+uv run eval_pretrained.py \
     --env_name=puzzle-3x3-play-v0 \
     --agent=agents/gcfbc/dual.py \
     --restore_path=results/.../gcfbc_dual/checkpoints --restore_epoch=50000

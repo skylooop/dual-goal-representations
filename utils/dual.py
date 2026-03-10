@@ -163,15 +163,17 @@ class GCBilinearRepresentationValue(nn.Module):
             ret_mean=True,
         )
 
-    def __call__(self, observations, goals=None):
+    def __call__(self, observations, goals=None, info=False):
         """
         Return the value/critic function or representation function.
         If both goals & obs are specified, then a scalar value will be returned.
         If just observations are specified, then a representation vector `phi(obs)` will be returned.
+        If info=True and goals is not None, returns (value, phi_s, psi_g).
         """
 
         if goals is not None:
-            # Value function call.
+            if info:
+                return self.network(observations, goals, actions=None, info=True)
             return self.network(observations, goals, actions=None, info=False)
         else:
             # Goal encoding; in this case, observations = goals to be encoded.

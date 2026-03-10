@@ -541,6 +541,46 @@ class GCIQEValue(nn.Module):
             return v
 
 
+class LatentDynamics(nn.Module):
+    """Latent control-affine dynamics model.
+
+    Learns the action-effect matrix B(s) such that z' - z ≈ B(s) a,
+    where z = ψ(s) is the latent state embedding.
+
+    Attributes:
+        hidden_dims: Hidden layer dimensions of the MLP backbone.
+        latent_dim: Dimension d of the latent state embedding.
+        action_dim: Dimension m of the action space.
+        layer_norm: Whether to apply layer normalization.
+    """
+
+    hidden_dims: Sequence[int]
+    latent_dim: int
+    action_dim: int
+    layer_norm: bool = True
+
+    def setup(self):
+        # Outputs a flat vector of size d * m, reshaped to (d, m).
+        self.B_net = MLP(
+            (*self.hidden_dims, self.latent_dim * self.action_dim),
+            activate_final=False,
+            layer_norm=self.layer_norm,
+        )
+
+    def __call__(self, observations):
+        """Return the action-effect matrix B(s) ∈ ℝ^{d × m}.
+
+        Args:
+            observations: Observations of shape (..., obs_dim).
+
+        Returns:
+            B: Action-effect matrix of shape (..., d, m).
+        """
+        flat = self.B_net(observations)
+        B = flat.reshape(*observations.shape[:-1], self.latent_dim, self.action_dim)
+        return B
+
+
 class ActorVectorField(nn.Module):
     hidden_dims: Sequence[int]
     action_dim: int

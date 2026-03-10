@@ -243,7 +243,7 @@ class CRLBYOLAgent(flax.struct.PyTreeNode):
             ex_actions: Example batch of actions. In discrete-action MDPs, this should contain the maximum action value.
             config: Configuration dictionary.
         """
-        rng = jax.random.PRNGKey(seed)
+        rng = jax.random.key(seed)
         rng, init_rng = jax.random.split(rng, 2)
 
         ex_goals = jnp.zeros(shape=(1, config['goalrep_dim']))
