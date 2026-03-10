@@ -92,13 +92,13 @@ Every experiment must run on a separate branch.
 
 Each experiment must satisfy following:
 
-1. Stop as soon as the TWO evaluations are completed.
+1. Stop as soon as the FOUR evaluations are completed.
 
 Implementation rule:
 
 - Launch training in background.
 - Poll `eval.csv` in the corresponding results folder.
-- As soon as `eval.csv` has at least two data rows, terminate training gracefully.
+- As soon as `eval.csv` has at least four data rows, terminate training gracefully.
 
 Notes:
 
@@ -114,8 +114,9 @@ uv run python main.py \
   --env_name=antmaze-large-navigate-v0 \
   --wandb_mode=offline
   --eval_interval=50000
+  --eval_episodes=30
 ```
-Ensure that eval_interval=50000 and log_interval=20000
+Ensure that eval_interval=50000 and log_interval=20000, eval_episodes=30
 
 You may pass additional CLI flags, but do not edit the train/eval hyperparameter definitions in `main.py`.
 
@@ -138,7 +139,7 @@ You must understand what you have already tried (which ideas/approaches). What w
 After each run:
 
 1. Find latest run directory in `results/<agent_name>/...`.
-2. Read `eval.csv` and extract first completed evaluation row.
+2. Read `eval.csv` and extract lastest completed evaluation row (corresponding to last eval)
 3. Compute:
    - `overall_success` = `evaluation/overall_success`
    - `mean_task_success` = mean of 5 per-task success columns from that row
