@@ -3,7 +3,10 @@
 This file defines how an autonomous agent should run research in this repository.
 
 Goal: improve evaluation success rate across tasks in the given RL environment (experiment with antmaze-large-navigate-v0)
-Right now we are experimenting with just GCIVL : `agents/gcivl/original.py`. Check the file `eikonal.tex` for an example of good research idea, which is both mathematically interesting, intuitive and intuitive.
+Right now we are experimenting with just GCIVL : `agents/gcivl/original.py`. Check the file `eikonal.tex` for an example of good research idea, which is both mathematically interesting, intuitive and intuitive. Other files in the `agents/gcivl/state/**` contain different representation learning approaches for helping learning better value functions.
+When running experiments, check the `hyperparameters.sh` file for getting best hyperparams for baselines.
+The baseline for GCIVL is already computed in the `results/gcivl/antmaze-large-navigate-v0_gcivl_sd000/eval.csv`
+Baseline for GCIVL + Dual `results/gcivl_dual/antmaze-large-navigate-v0_gcivl_sd000/eval.csv`
 
 ## Project structure (what to read, what to modify)
 
@@ -110,7 +113,8 @@ uv run python main.py \
   --eval_episodes=30
   --wandb_mode=online
 ```
-Ensure that eval_interval=100000 and log_interval=30000, eval_episodes=30. The run must be active until whole million iterations are performed of training. 
+
+Ensure that eval_interval=100000 and log_interval=30000, eval_episodes=30. The run must be active until whole million iterations are performed of training.
 
 You may pass additional CLI flags, but do not edit the train/eval hyperparameter definitions in `main.py`.
 
@@ -124,7 +128,7 @@ Focus on new ideas and directions (not just obvious hyperparameter tuning). Try 
 - sampling and augmentation choices in agent code,
 - network architecture changes in allowed files.
 
-Simplicity criterion: All else being equal, simpler is better. A small improvement that adds ugly complexity is not worth it. Conversely, removing something and getting equal or better results is a great outcome — that's a simplification win. When evaluating whether to keep a change, weigh the complexity cost against the improvement magnitude. An improvement that adds 20 lines of hacky code? Probably not worth it. A small improvement from deleting code? Definitely keep. An improvement of ~0 but much simpler code? Keep. 
+Simplicity criterion: All else being equal, simpler is better. A small improvement that adds ugly complexity is not worth it. Conversely, removing something and getting equal or better results is a great outcome — that's a simplification win. When evaluating whether to keep a change, weigh the complexity cost against the improvement magnitude. An improvement that adds 20 lines of hacky code? Probably not worth it. A small improvement from deleting code? Definitely keep. An improvement of ~0 but much simpler code? Keep.
 
 You must understand what you have already tried (which ideas/approaches). What worked and what not.
 
@@ -152,7 +156,7 @@ Status policy:
 - `keep`: strictly better `overall_success`, or equal `overall_success` with better `mean_task_success` and comparable complexity.
 - `discard`: valid run but not better.
 - `crash`: runtime failure, NaNs (either at eval or train), or malformed outputs.
-Make a short description what was tried and insights for each branch.
+  Make a short description what was tried and insights for each branch.
 
 ## Autonomous loop
 
@@ -163,7 +167,7 @@ Repeat until interrupted by user:
 3. Edit only allowed files.
 4. Commit.
 5. Parse metrics from `eval.csv` (+ inspect `train.csv` for debugging only and better understanding of the evolution of metrics).
-6. Check `thoughts.md` file (if exists) and get understanding what was tried in the best branch. 
+6. Check `thoughts.md` file (if exists) and get understanding what was tried in the best branch.
 7. Log in `results.tsv`.
 8. Keep or discard branch by metric policy.
 
