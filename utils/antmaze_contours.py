@@ -213,7 +213,7 @@ def _nearest_free_idx(X, Y, obstacle_mask, goal_xy):
     return np.unravel_index(idx, X.shape)
 
 
-def _style_axes_maze(ax, rects, x_min, x_max, y_min, y_max):
+def _style_axes_maze(ax, rects, x_min, x_max, y_min, y_max, goal_xy=None):
     for xmin, ymin, xmax, ymax in rects:
         ax.add_patch(
             Rectangle(
@@ -228,6 +228,18 @@ def _style_axes_maze(ax, rects, x_min, x_max, y_min, y_max):
         )
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
+    if goal_xy is not None:
+        ax.scatter(
+            goal_xy[0],
+            goal_xy[1],
+            marker="*",
+            s=220,
+            color="#ffcc00",
+            edgecolor="black",
+            linewidth=0.8,
+            zorder=12,
+            label="Goal",
+        )
     ax.set_facecolor("#eef2f7")
     ax.set_xticks([])
     ax.set_yticks([])
@@ -419,7 +431,7 @@ def plot_antmaze_learned_and_analytic(
     )
     label = f"{maze_type}/{task_name}" if task_name else maze_type
     axes[0, 0].set_title(f"Eikonal Value ({label})", fontsize=18, family="monospace")
-    _style_axes_maze(axes[0, 0], rects, x_min, x_max, y_min, y_max)
+    _style_axes_maze(axes[0, 0], rects, x_min, x_max, y_min, y_max, goal_xy=goal_xy)
 
     levels_learned = np.linspace(np.nanmin(v_learned), np.nanmax(v_learned), 26)
     axes[0, 1].contourf(
@@ -431,7 +443,7 @@ def plot_antmaze_learned_and_analytic(
         levels=levels_learned, colors="black", linewidths=0.35, alpha=0.72,
     )
     axes[0, 1].set_title(f"Learned Value (-V) ({label})", fontsize=18, family="monospace")
-    _style_axes_maze(axes[0, 1], rects, x_min, x_max, y_min, y_max)
+    _style_axes_maze(axes[0, 1], rects, x_min, x_max, y_min, y_max, goal_xy=goal_xy)
 
     step = max(2, points_per_cell // 2)
     axes[1, 0].quiver(
@@ -441,7 +453,7 @@ def plot_antmaze_learned_and_analytic(
         width=0.0034, alpha=0.93,
     )
     axes[1, 0].set_title(rf"Eikonal Policy ($-\nabla V$) ({label})", fontsize=18, family="monospace")
-    _style_axes_maze(axes[1, 0], rects, x_min, x_max, y_min, y_max)
+    _style_axes_maze(axes[1, 0], rects, x_min, x_max, y_min, y_max, goal_xy=goal_xy)
 
     axes[1, 1].quiver(
         X[::step, ::step], Y[::step, ::step],
@@ -450,7 +462,7 @@ def plot_antmaze_learned_and_analytic(
         width=0.0034, alpha=0.93,
     )
     axes[1, 1].set_title(rf"Learned Policy ($-\nabla V$) ({label})", fontsize=18, family="monospace")
-    _style_axes_maze(axes[1, 1], rects, x_min, x_max, y_min, y_max)
+    _style_axes_maze(axes[1, 1], rects, x_min, x_max, y_min, y_max, goal_xy=goal_xy)
 
     plt.tight_layout(pad=0.7, w_pad=0.5, h_pad=0.7)
     suffix = f"_{task_name}" if task_name else ""
