@@ -13,6 +13,15 @@ python main.py --env_name=scene-play-v0 --agent=agents/gcivl/original.py --agent
 python main.py --env_name=puzzle-3x3-play-v0 --agent=agents/gcivl/original.py --agent.alpha=10.0 --agent.discount=0.99
 python main.py --env_name=puzzle-4x4-play-v0 --agent=agents/gcivl/original.py --agent.alpha=10.0 --agent.discount=0.99
 
+# GCIVL original + Eikonal (recommended for navigation)
+python main.py --env_name=pointmaze-medium-navigate-v0 --agent=agents/gcivl/original.py --agent.alpha=10.0 --agent.discount=0.99 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.02 --agent.eikonal_target_norm=1.0
+python main.py --env_name=pointmaze-large-navigate-v0 --agent=agents/gcivl/original.py --agent.alpha=10.0 --agent.discount=0.99 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.02 --agent.eikonal_target_norm=1.0
+python main.py --env_name=antmaze-medium-navigate-v0 --agent=agents/gcivl/original.py --agent.alpha=10.0 --agent.discount=0.99 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.05 --agent.eikonal_target_norm=1.0
+python main.py --env_name=antmaze-large-navigate-v0 --agent=agents/gcivl/original.py --agent.alpha=10.0 --agent.discount=0.99 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.05 --agent.eikonal_target_norm=1.0
+python main.py --env_name=antmaze-giant-navigate-v0 --agent=agents/gcivl/original.py --agent.alpha=10.0 --agent.discount=0.99 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.03 --agent.eikonal_target_norm=1.0
+python main.py --env_name=humanoidmaze-medium-navigate-v0 --agent=agents/gcivl/original.py --agent.alpha=10.0 --agent.discount=0.995 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.01 --agent.eikonal_target_norm=1.0
+python main.py --env_name=humanoidmaze-large-navigate-v0 --agent=agents/gcivl/original.py --agent.alpha=10.0 --agent.discount=0.995 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.01 --agent.eikonal_target_norm=1.0
+
 # GCIVL + dual
 python main.py --env_name=pointmaze-medium-navigate-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.9 --agent.goalrep_dim=64 --agent.discount=0.99
 python main.py --env_name=pointmaze-large-navigate-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.9 --agent.goalrep_dim=64 --agent.discount=0.99
@@ -27,6 +36,15 @@ python main.py --env_name=cube-double-play-v0 --agent=agents/gcivl/state/dual.py
 python main.py --env_name=scene-play-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.7 --agent.goalrep_dim=256 --agent.discount=0.99
 python main.py --env_name=puzzle-3x3-play-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.7 --agent.goalrep_dim=256 --agent.discount=0.99
 python main.py --env_name=puzzle-4x4-play-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.7 --agent.goalrep_dim=256 --agent.discount=0.99
+
+# GCIVL + dual + Eikonal (recommended for navigation)
+python main.py --env_name=pointmaze-medium-navigate-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.9 --agent.goalrep_dim=64 --agent.discount=0.99 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.02 --agent.eikonal_target_norm=1.0
+python main.py --env_name=pointmaze-large-navigate-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.9 --agent.goalrep_dim=64 --agent.discount=0.99 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.02 --agent.eikonal_target_norm=1.0
+python main.py --env_name=antmaze-medium-navigate-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.9 --agent.goalrep_dim=256 --agent.discount=0.99 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.03 --agent.eikonal_target_norm=1.0
+python main.py --env_name=antmaze-large-navigate-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.9 --agent.goalrep_dim=256 --agent.discount=0.99 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.03 --agent.eikonal_target_norm=1.0
+python main.py --env_name=antmaze-giant-navigate-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.9 --agent.goalrep_dim=256 --agent.discount=0.995 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.02 --agent.eikonal_target_norm=1.0
+python main.py --env_name=humanoidmaze-medium-navigate-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.9 --agent.goalrep_dim=256 --agent.discount=0.995 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.01 --agent.eikonal_target_norm=1.0
+python main.py --env_name=humanoidmaze-large-navigate-v0 --agent=agents/gcivl/state/dual.py --agent.alpha=10.0 --agent.rep_type=bilinear --agent.rep_expectile=0.9 --agent.goalrep_dim=256 --agent.discount=0.995 --agent.use_eikonal_loss=True --agent.eikonal_loss_weight=0.01 --agent.eikonal_target_norm=1.0
 
 # GCIVL + BYOL
 python main.py --env_name=pointmaze-medium-navigate-v0 --agent=agents/gcivl/state/byol.py --agent.alpha=10.0 --agent.goalrep_dim=64 --agent.discount=0.99

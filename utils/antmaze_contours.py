@@ -22,6 +22,7 @@ import scipy.sparse.linalg as spla
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+import matplotlib.patheffects as pe
 
 
 # -----------------------------------------------------------------------------
@@ -103,18 +104,32 @@ def solve_fk_value_on_grid(x, y, obstacle_mask, goal_xy, nu):
     return v
 
 
-def solve_eikonal_value_grid(obstacle_mask, goal_idx, hx, hy):
-    """Solve Eikonal distance field on a grid via Dijkstra in free space."""
+def solve_eikonal_value_grid(obstacle_mask, goal_idx, hx, hy, cost_mode="unit"):
+    """Solve Eikonal value field on a grid via Dijkstra in free space.
+
+    Args:
+        cost_mode: "unit" for shortest-path step count, or "metric" for geometric
+            path length in XY units.
+    """
     h_diag = np.hypot(hx, hy)
+    if cost_mode == "unit":
+        c_axial = 1.0
+        c_diag = 1.0
+    elif cost_mode == "metric":
+        c_axial = None
+        c_diag = h_diag
+    else:
+        raise ValueError(f"Unsupported Eikonal cost_mode: {cost_mode}")
+
     neighbors = [
-        (-1, 0, hy),
-        (1, 0, hy),
-        (0, -1, hx),
-        (0, 1, hx),
-        (-1, -1, h_diag),
-        (-1, 1, h_diag),
-        (1, -1, h_diag),
-        (1, 1, h_diag),
+        (-1, 0, c_axial if c_axial is not None else hy),
+        (1, 0, c_axial if c_axial is not None else hy),
+        (0, -1, c_axial if c_axial is not None else hx),
+        (0, 1, c_axial if c_axial is not None else hx),
+        (-1, -1, c_diag),
+        (-1, 1, c_diag),
+        (1, -1, c_diag),
+        (1, 1, c_diag),
     ]
 
     ny, nx = obstacle_mask.shape
@@ -248,6 +263,31 @@ def _style_axes_maze(ax, rects, x_min, x_max, y_min, y_max, goal_xy=None):
         spine.set_visible(False)
 
 
+def _nice_contour_labels(ax, contour_set, fmt="%.1f", max_levels=10):
+    """Add readable numeric labels on contour lines."""
+    if contour_set is None or len(contour_set.levels) == 0:
+        return
+
+    levels = np.asarray(contour_set.levels)
+    if len(levels) > max_levels:
+        idx = np.linspace(0, len(levels) - 1, max_levels).astype(int)
+        label_levels = levels[idx]
+    else:
+        label_levels = levels
+
+    labels = ax.clabel(
+        contour_set,
+        levels=label_levels,
+        inline=True,
+        inline_spacing=2,
+        fontsize=8.5,
+        fmt=fmt,
+        colors="#111111",
+    )
+    for txt in labels:
+        txt.set_path_effects([pe.withStroke(linewidth=2.4, foreground="white")])
+
+
 # -----------------------------------------------------------------------------
 # Learned value and policy (agent-dependent)
 # -----------------------------------------------------------------------------
@@ -315,6 +355,7 @@ def _build_antmaze_grid_and_analytic(
     points_per_cell: int = 14,
     nu: float = 2.5,
     goal_xy_override: tuple[float, float] | None = None,
+    eikonal_cost_mode: str = "unit",
 ) -> tuple[Any, ...]:
     """Build grid (X, Y), obstacle mask, rects, bounds, and analytical Eikonal/FK values."""
     maze_map, goal_ij = _ogbench_antmaze_layout(maze_type)
@@ -346,7 +387,13 @@ def _build_antmaze_grid_and_analytic(
 
     v_fk = solve_fk_value_on_grid(x, y, obstacle_mask, goal_xy, nu)
     goal_idx = _nearest_free_idx(X, Y, obstacle_mask, goal_xy)
-    v_eik = solve_eikonal_value_grid(obstacle_mask, goal_idx, hx, hy)
+    v_eik = solve_eikonal_value_grid(
+        obstacle_mask,
+        goal_idx,
+        hx,
+        hy,
+        cost_mode=eikonal_cost_mode,
+    )
 
     v_eik_max = np.nanmax(v_eik[~obstacle_mask])
     v_fk_max = np.nanmax(v_fk[~obstacle_mask])
@@ -397,6 +444,7 @@ def plot_antmaze_learned_and_analytic(
     task_name: str | None = None,
     dataset_samples: np.ndarray | jnp.ndarray | None = None,
     max_dataset_samples: int = 100,
+    eikonal_cost_mode: str = "unit",
 ) -> str:
     """Plot 2x2: Eikonal value, Learned value; Eikonal policy, Learned policy. Save to save_dir."""
     agent = jax.device_put(agent, device=jax.devices("cpu")[0])
@@ -421,7 +469,11 @@ def plot_antmaze_learned_and_analytic(
         goal_xy_eval,
         (x_min, x_max, y_min, y_max),
     ) = _build_antmaze_grid_and_analytic(
-        maze_type, points_per_cell=points_per_cell, nu=nu, goal_xy_override=goal_xy
+        maze_type,
+        points_per_cell=points_per_cell,
+        nu=nu,
+        goal_xy_override=goal_xy,
+        eikonal_cost_mode=eikonal_cost_mode,
     )
 
     ny, nx = X.shape
@@ -498,7 +550,7 @@ def plot_antmaze_learned_and_analytic(
         corner_mask=False,
         extend="max",
     )
-    axes[0, 0].contour(
+    eik_contours = axes[0, 0].contour(
         X,
         Y,
         v_eik_lines,
@@ -507,6 +559,8 @@ def plot_antmaze_learned_and_analytic(
         linewidths=0.35,
         alpha=0.72,
     )
+    eik_fmt = "%d" if eikonal_cost_mode == "unit" else "%.1f"
+    _nice_contour_labels(axes[0, 0], eik_contours, fmt=eik_fmt, max_levels=10)
     label = f"{maze_type}/{task_name}" if task_name else maze_type
     axes[0, 0].set_title(f"Eikonal Value ({label})", fontsize=18, family="monospace")
     _style_axes_maze(axes[0, 0], rects, x_min, x_max, y_min, y_max, goal_xy=goal_xy)
@@ -521,7 +575,7 @@ def plot_antmaze_learned_and_analytic(
         corner_mask=False,
         extend="max",
     )
-    axes[0, 1].contour(
+    learned_contours = axes[0, 1].contour(
         X,
         Y,
         v_learned_lines,
@@ -530,6 +584,7 @@ def plot_antmaze_learned_and_analytic(
         linewidths=0.35,
         alpha=0.72,
     )
+    _nice_contour_labels(axes[0, 1], learned_contours, fmt="%.1f", max_levels=10)
     axes[0, 1].set_title(
         f"Learned Value (-V) ({label})", fontsize=18, family="monospace"
     )

@@ -27,6 +27,39 @@ class GCIVLAgent(flax.struct.PyTreeNode):
         weight = jnp.where(adv >= 0, expectile, (1 - expectile))
         return weight * (diff**2)
 
+    def eikonal_loss(self, observations, goals, grad_params):
+        """Compute Eikonal regularization on value gradients."""
+        if (
+            not self.config["use_eikonal_loss"]
+            or self.config["eikonal_loss_weight"] <= 0.0
+        ):
+            return jnp.array(0.0, dtype=observations.dtype)
+
+        value_fn = self.network.select("value")
+
+        def distance1(state, goal):
+            v1, _ = value_fn(state[None, :], goal[None, :], params=grad_params)
+            return -v1[0]
+
+        def distance2(state, goal):
+            _, v2 = value_fn(state[None, :], goal[None, :], params=grad_params)
+            return -v2[0]
+
+        grad_distance1 = jax.vmap(jax.grad(distance1, argnums=0), in_axes=(0, 0))(
+            observations, goals
+        )
+        grad_distance2 = jax.vmap(jax.grad(distance2, argnums=0), in_axes=(0, 0))(
+            observations, goals
+        )
+
+        grad_norm1 = jnp.linalg.norm(grad_distance1, axis=-1)
+        grad_norm2 = jnp.linalg.norm(grad_distance2, axis=-1)
+        target = self.config["eikonal_target_norm"]
+        reg = jnp.mean((grad_norm1 - target) ** 2) + jnp.mean(
+            (grad_norm2 - target) ** 2
+        )
+        return self.config["eikonal_loss_weight"] * reg
+
     def value_loss(self, batch, grad_params):
         """Compute the IVL value loss.
 
@@ -57,10 +90,18 @@ class GCIVLAgent(flax.struct.PyTreeNode):
 
         value_loss1 = self.expectile_loss(adv, q1 - v1, self.config["expectile"]).mean()
         value_loss2 = self.expectile_loss(adv, q2 - v2, self.config["expectile"]).mean()
-        value_loss = value_loss1 + value_loss2
+        td_value_loss = value_loss1 + value_loss2
+        eikonal_loss = self.eikonal_loss(
+            batch["observations"],
+            batch["value_goals"],
+            grad_params,
+        )
+        value_loss = td_value_loss + eikonal_loss
 
         return value_loss, {
             "value_loss": value_loss,
+            "td_value_loss": td_value_loss,
+            "eikonal_loss": eikonal_loss,
             "v_mean": v.mean(),
             "v_max": v.max(),
             "v_min": v.min(),
@@ -255,6 +296,9 @@ def get_config():
             tau=0.005,  # Target network update rate.
             expectile=0.9,  # IQL expectile.
             alpha=10.0,  # AWR temperature.
+            use_eikonal_loss=False,  # Whether to include Eikonal loss.
+            eikonal_loss_weight=0.0,  # Eikonal regularization coefficient on ||grad_s(-V)||.
+            eikonal_target_norm=1.0,  # Target norm in Eikonal regularizer.
             actor_advantage_mode="td",  # 'td' for r + gamma * V(s') - V(s), or 'vdelta' for V(s') - V(s).
             const_std=True,  # Whether to use constant standard deviation for the actor.
             discrete=False,  # Whether the action space is discrete.

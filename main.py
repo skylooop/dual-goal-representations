@@ -1,7 +1,5 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
 import sys
 import rootutils
 import warnings
@@ -43,6 +41,11 @@ from utils.log_utils import (
 
 # WANDB & LOGGING
 flags.DEFINE_string("run_group", "Debug", "Run group.")
+flags.DEFINE_list(
+    "wandb_tags",
+    [],
+    "Additional W&B tags to attach to this run (comma-separated).",
+)
 
 # GENERAL
 flags.DEFINE_integer("seed", 0, "Random seed.")
@@ -77,12 +80,18 @@ def main():
     # Set up logger.
     config = FLAGS.agent
 
-    exp_name = get_exp_name(FLAGS.env_name, config["agent_name"], FLAGS.seed)
+    exp_name = get_exp_name(
+        FLAGS.env_name,
+        config["agent_name"],
+        FLAGS.seed,
+        tags=FLAGS.wandb_tags,
+    )
     setup_wandb(
         project="dual_goal_reprs-Research",
         mode=FLAGS.wandb_mode,
         group=FLAGS.agent.agent_name,
         name=exp_name,
+        tags=FLAGS.wandb_tags,
     )
 
     FLAGS.save_dir = os.path.join(FLAGS.save_dir, FLAGS.agent.agent_name, exp_name)

@@ -23,32 +23,40 @@ class GCIVLBYOLAgent(flax.struct.PyTreeNode):
 
     def byol_loss(self, batch, grad_params):
         """Compute the self-predictive representation loss."""
-        state_rep1, state_rep2 = self.network.select('phi')(batch['observations'], params=grad_params)
+        state_rep1, state_rep2 = self.network.select("phi")(
+            batch["observations"], params=grad_params
+        )
         state_rep = (state_rep1 + state_rep2) / 2
-        next_pred1, next_pred2 = self.network.select('psi_f')(
-            jnp.concatenate([state_rep, batch['actions']], axis=-1), params=grad_params
+        next_pred1, next_pred2 = self.network.select("psi_f")(
+            jnp.concatenate([state_rep, batch["actions"]], axis=-1), params=grad_params
         )
         next_pred = (next_pred1 + next_pred2) / 2
-        goal_rep1, goal_rep2 = self.network.select('phi')(batch['rep_goals'])
+        goal_rep1, goal_rep2 = self.network.select("phi")(batch["rep_goals"])
         goal_rep = (goal_rep1 + goal_rep2) / 2
 
         forward_loss = -jnp.sum(
-            jax.nn.softmax(goal_rep, axis=-1) * jax.nn.log_softmax(next_pred, axis=-1), axis=-1
+            jax.nn.softmax(goal_rep, axis=-1) * jax.nn.log_softmax(next_pred, axis=-1),
+            axis=-1,
         ).mean()
 
         state_rep = jax.lax.stop_gradient(state_rep)
-        goal_rep1, goal_rep2 = self.network.select('phi')(batch['rep_goals'], params=grad_params)
+        goal_rep1, goal_rep2 = self.network.select("phi")(
+            batch["rep_goals"], params=grad_params
+        )
         goal_rep = (goal_rep1 + goal_rep2) / 2
-        prev_pred1, prev_pred2 = self.network.select('psi_b')(goal_rep, params=grad_params)
+        prev_pred1, prev_pred2 = self.network.select("psi_b")(
+            goal_rep, params=grad_params
+        )
         prev_pred = (prev_pred1 + prev_pred2) / 2
 
         backward_loss = -jnp.sum(
-            jax.nn.softmax(prev_pred, axis=-1) * jax.nn.log_softmax(state_rep, axis=-1), axis=-1
+            jax.nn.softmax(prev_pred, axis=-1) * jax.nn.log_softmax(state_rep, axis=-1),
+            axis=-1,
         ).mean()
 
         return forward_loss + backward_loss, {
-            'forward_loss': forward_loss,
-            'backward_loss': backward_loss,
+            "forward_loss": forward_loss,
+            "backward_loss": backward_loss,
         }
 
     @staticmethod
@@ -56,6 +64,39 @@ class GCIVLBYOLAgent(flax.struct.PyTreeNode):
         """Compute the expectile loss."""
         weight = jnp.where(adv >= 0, expectile, (1 - expectile))
         return weight * (diff**2)
+
+    def eikonal_loss(self, observations, goals, grad_params):
+        """Compute Eikonal regularization on value gradients."""
+        if (
+            not self.config["use_eikonal_loss"]
+            or self.config["eikonal_loss_weight"] <= 0.0
+        ):
+            return jnp.array(0.0, dtype=observations.dtype)
+
+        value_fn = self.network.select("value")
+
+        def distance1(state, goal):
+            v1, _ = value_fn(state[None, :], goal[None, :], params=grad_params)
+            return -v1[0]
+
+        def distance2(state, goal):
+            _, v2 = value_fn(state[None, :], goal[None, :], params=grad_params)
+            return -v2[0]
+
+        grad_distance1 = jax.vmap(jax.grad(distance1, argnums=0), in_axes=(0, 0))(
+            observations, goals
+        )
+        grad_distance2 = jax.vmap(jax.grad(distance2, argnums=0), in_axes=(0, 0))(
+            observations, goals
+        )
+
+        grad_norm1 = jnp.linalg.norm(grad_distance1, axis=-1)
+        grad_norm2 = jnp.linalg.norm(grad_distance2, axis=-1)
+        target = self.config["eikonal_target_norm"]
+        reg = jnp.mean((grad_norm1 - target) ** 2) + jnp.mean(
+            (grad_norm2 - target) ** 2
+        )
+        return self.config["eikonal_loss_weight"] * reg
 
     def value_loss(self, batch, grad_params):
         """Compute the IVL value loss.
@@ -66,63 +107,79 @@ class GCIVLBYOLAgent(flax.struct.PyTreeNode):
         compute the former and the current value function to compute the latter. This is similar to how double DQN
         mitigates overestimation bias.
         """
-        goal_rep1, goal_rep2 = self.network.select('phi')(batch['value_goals'])
+        goal_rep1, goal_rep2 = self.network.select("phi")(batch["value_goals"])
         goal_rep = (goal_rep1 + goal_rep2) / 2
 
-        (next_v1_t, next_v2_t) = self.network.select('target_value')(batch['next_observations'], goal_rep)
+        (next_v1_t, next_v2_t) = self.network.select("target_value")(
+            batch["next_observations"], goal_rep
+        )
         next_v_t = jnp.minimum(next_v1_t, next_v2_t)
-        q = batch['rewards'] + self.config['discount'] * batch['masks'] * next_v_t
+        q = batch["rewards"] + self.config["discount"] * batch["masks"] * next_v_t
 
-        (v1_t, v2_t) = self.network.select('target_value')(batch['observations'], goal_rep)
+        (v1_t, v2_t) = self.network.select("target_value")(
+            batch["observations"], goal_rep
+        )
         v_t = (v1_t + v2_t) / 2
         adv = q - v_t
 
-        q1 = batch['rewards'] + self.config['discount'] * batch['masks'] * next_v1_t
-        q2 = batch['rewards'] + self.config['discount'] * batch['masks'] * next_v2_t
-        (v1, v2) = self.network.select('value')(batch['observations'], goal_rep, params=grad_params)
+        q1 = batch["rewards"] + self.config["discount"] * batch["masks"] * next_v1_t
+        q2 = batch["rewards"] + self.config["discount"] * batch["masks"] * next_v2_t
+        (v1, v2) = self.network.select("value")(
+            batch["observations"], goal_rep, params=grad_params
+        )
         v = (v1 + v2) / 2
 
-        value_loss1 = self.expectile_loss(adv, q1 - v1, self.config['expectile']).mean()
-        value_loss2 = self.expectile_loss(adv, q2 - v2, self.config['expectile']).mean()
-        value_loss = value_loss1 + value_loss2
+        value_loss1 = self.expectile_loss(adv, q1 - v1, self.config["expectile"]).mean()
+        value_loss2 = self.expectile_loss(adv, q2 - v2, self.config["expectile"]).mean()
+        td_value_loss = value_loss1 + value_loss2
+        eikonal_loss = self.eikonal_loss(
+            batch["observations"],
+            jax.lax.stop_gradient(goal_rep),
+            grad_params,
+        )
+        value_loss = td_value_loss + eikonal_loss
 
         return value_loss, {
-            'value_loss': value_loss,
-            'v_mean': v.mean(),
-            'v_max': v.max(),
-            'v_min': v.min(),
+            "value_loss": value_loss,
+            "td_value_loss": td_value_loss,
+            "eikonal_loss": eikonal_loss,
+            "v_mean": v.mean(),
+            "v_max": v.max(),
+            "v_min": v.min(),
         }
 
     def actor_loss(self, batch, grad_params, rng=None):
         """Compute the AWR actor loss."""
 
-        goal_rep1, goal_rep2 = self.network.select('phi')(batch['actor_goals'])
+        goal_rep1, goal_rep2 = self.network.select("phi")(batch["actor_goals"])
         goal_rep = (goal_rep1 + goal_rep2) / 2
 
-        v1, v2 = self.network.select('value')(batch['observations'], goal_rep)
-        nv1, nv2 = self.network.select('value')(batch['next_observations'], goal_rep)
+        v1, v2 = self.network.select("value")(batch["observations"], goal_rep)
+        nv1, nv2 = self.network.select("value")(batch["next_observations"], goal_rep)
         v = (v1 + v2) / 2
         nv = (nv1 + nv2) / 2
         adv = nv - v
 
-        exp_a = jnp.exp(adv * self.config['alpha'])
+        exp_a = jnp.exp(adv * self.config["alpha"])
         exp_a = jnp.minimum(exp_a, 100.0)
 
-        dist = self.network.select('actor')(batch['observations'], goal_rep, params=grad_params)
-        log_prob = dist.log_prob(batch['actions'])
+        dist = self.network.select("actor")(
+            batch["observations"], goal_rep, params=grad_params
+        )
+        log_prob = dist.log_prob(batch["actions"])
 
         actor_loss = -(exp_a * log_prob).mean()
 
         actor_info = {
-            'actor_loss': actor_loss,
-            'adv': adv.mean(),
-            'bc_log_prob': log_prob.mean(),
+            "actor_loss": actor_loss,
+            "adv": adv.mean(),
+            "bc_log_prob": log_prob.mean(),
         }
-        if not self.config['discrete']:
+        if not self.config["discrete"]:
             actor_info.update(
                 {
-                    'mse': jnp.mean((dist.mode() - batch['actions']) ** 2),
-                    'std': jnp.mean(dist.scale_diag),
+                    "mse": jnp.mean((dist.mode() - batch["actions"]) ** 2),
+                    "std": jnp.mean(dist.scale_diag),
                 }
             )
 
@@ -136,16 +193,16 @@ class GCIVLBYOLAgent(flax.struct.PyTreeNode):
 
         byol_loss, byol_info = self.byol_loss(batch, grad_params)
         for k, v in byol_info.items():
-            info[f'byol/{k}'] = v
+            info[f"byol/{k}"] = v
 
         value_loss, value_info = self.value_loss(batch, grad_params)
         for k, v in value_info.items():
-            info[f'value/{k}'] = v
+            info[f"value/{k}"] = v
 
         rng, actor_rng = jax.random.split(rng)
         actor_loss, actor_info = self.actor_loss(batch, grad_params, actor_rng)
         for k, v in actor_info.items():
-            info[f'actor/{k}'] = v
+            info[f"actor/{k}"] = v
 
         loss = value_loss + actor_loss + byol_loss
         return loss, info
@@ -153,11 +210,11 @@ class GCIVLBYOLAgent(flax.struct.PyTreeNode):
     def target_update(self, network, module_name):
         """Update the target network."""
         new_target_params = jax.tree_util.tree_map(
-            lambda p, tp: p * self.config['tau'] + tp * (1 - self.config['tau']),
-            self.network.params[f'modules_{module_name}'],
-            self.network.params[f'modules_target_{module_name}'],
+            lambda p, tp: p * self.config["tau"] + tp * (1 - self.config["tau"]),
+            self.network.params[f"modules_{module_name}"],
+            self.network.params[f"modules_target_{module_name}"],
         )
-        network.params[f'modules_target_{module_name}'] = new_target_params
+        network.params[f"modules_target_{module_name}"] = new_target_params
 
     @jax.jit
     def update(self, batch):
@@ -168,7 +225,7 @@ class GCIVLBYOLAgent(flax.struct.PyTreeNode):
             return self.total_loss(batch, grad_params, rng=rng)
 
         new_network, info = self.network.apply_loss_fn(loss_fn=loss_fn)
-        self.target_update(new_network, 'value')
+        self.target_update(new_network, "value")
 
         return self.replace(network=new_network, rng=new_rng), info
 
@@ -181,11 +238,13 @@ class GCIVLBYOLAgent(flax.struct.PyTreeNode):
         temperature=1.0,
     ):
         """Sample actions from the actor."""
-        goal_rep1, goal_rep2 = self.network.select('phi')(goals)
+        goal_rep1, goal_rep2 = self.network.select("phi")(goals)
         goal_rep = (goal_rep1 + goal_rep2) / 2
-        dist = self.network.select('actor')(observations, goal_rep, temperature=temperature)
+        dist = self.network.select("actor")(
+            observations, goal_rep, temperature=temperature
+        )
         actions = dist.sample(seed=seed)
-        if not self.config['discrete']:
+        if not self.config["discrete"]:
             actions = jnp.clip(actions, -1, 1)
         return actions
 
@@ -209,8 +268,8 @@ class GCIVLBYOLAgent(flax.struct.PyTreeNode):
         rng = jax.random.PRNGKey(seed)
         rng, init_rng = jax.random.split(rng, 2)
 
-        ex_goals = jnp.zeros(shape=(1, config['goalrep_dim']))
-        if config['discrete']:
+        ex_goals = jnp.zeros(shape=(1, config["goalrep_dim"]))
+        if config["discrete"]:
             action_dim = ex_actions.max() + 1
         else:
             action_dim = ex_actions.shape[-1]
@@ -218,35 +277,35 @@ class GCIVLBYOLAgent(flax.struct.PyTreeNode):
         # NOTE: this version does not support pixel-based observations; please refer to the visual-dedicated file.
         # Define value and actor networks.
         value_def = GCValue(
-            hidden_dims=config['value_hidden_dims'],
-            layer_norm=config['layer_norm'],
+            hidden_dims=config["value_hidden_dims"],
+            layer_norm=config["layer_norm"],
             ensemble=True,
         )
 
-        if config['discrete']:
+        if config["discrete"]:
             actor_def = GCDiscreteActor(
-                hidden_dims=config['actor_hidden_dims'],
+                hidden_dims=config["actor_hidden_dims"],
                 action_dim=action_dim,
             )
         else:
             actor_def = GCActor(
-                hidden_dims=config['actor_hidden_dims'],
+                hidden_dims=config["actor_hidden_dims"],
                 action_dim=action_dim,
                 state_dependent_std=False,
-                const_std=config['const_std'],
+                const_std=config["const_std"],
             )
 
         phi_def = ensemblize(MLP, 2)(
-            hidden_dims=config['rep_hidden_dims'] + (config['goalrep_dim'],),
-            layer_norm=config['layer_norm'],
+            hidden_dims=config["rep_hidden_dims"] + (config["goalrep_dim"],),
+            layer_norm=config["layer_norm"],
         )
         psi_f_def = ensemblize(MLP, 2)(
-            hidden_dims=config['rep_hidden_dims'] + (config['goalrep_dim'],),
-            layer_norm=config['layer_norm'],
+            hidden_dims=config["rep_hidden_dims"] + (config["goalrep_dim"],),
+            layer_norm=config["layer_norm"],
         )
         psi_b_def = ensemblize(MLP, 2)(
-            hidden_dims=config['rep_hidden_dims'] + (config['goalrep_dim'],),
-            layer_norm=config['layer_norm'],
+            hidden_dims=config["rep_hidden_dims"] + (config["goalrep_dim"],),
+            layer_norm=config["layer_norm"],
         )
 
         network_info = dict(
@@ -261,12 +320,12 @@ class GCIVLBYOLAgent(flax.struct.PyTreeNode):
         network_args = {k: v[1] for k, v in network_info.items()}
 
         network_def = ModuleDict(networks)
-        network_tx = optax.adam(learning_rate=config['lr'])
-        network_params = network_def.init(init_rng, **network_args)['params']
+        network_tx = optax.adam(learning_rate=config["lr"])
+        network_params = network_def.init(init_rng, **network_args)["params"]
         network = TrainState.create(network_def, network_params, tx=network_tx)
 
         params = network_params
-        params['modules_target_value'] = params['modules_value']
+        params["modules_target_value"] = params["modules_value"]
 
         return cls(rng, network=network, config=flax.core.FrozenDict(**config))
 
@@ -275,10 +334,14 @@ def get_config():
     config = ml_collections.ConfigDict(
         dict(
             # Agent hyperparameters.
-            agent_name='gcivl_byol',  # Agent name.
+            agent_name="gcivl_byol",  # Agent name.
             lr=3e-4,  # Learning rate.
             batch_size=1024,  # Batch size.
-            rep_hidden_dims=(512, 512, 512),  # Representation network hidden dimensions.
+            rep_hidden_dims=(
+                512,
+                512,
+                512,
+            ),  # Representation network hidden dimensions.
             actor_hidden_dims=(512, 512, 512),  # Actor network hidden dimensions.
             value_hidden_dims=(512, 512, 512),  # Value network hidden dimensions.
             layer_norm=True,  # Whether to use layer normalization.
@@ -286,11 +349,14 @@ def get_config():
             tau=0.005,  # Target network update rate.
             expectile=0.9,  # IQL expectile.
             alpha=10.0,  # AWR temperature.
+            use_eikonal_loss=False,  # Whether to include Eikonal loss.
+            eikonal_loss_weight=0.0,  # Eikonal regularization coefficient on ||grad_s(-V)||.
+            eikonal_target_norm=1.0,  # Target norm in Eikonal regularizer.
             const_std=True,  # Whether to use constant standard deviation for the actor.
             discrete=False,  # Whether the action space is discrete.
             goalrep_dim=64,  # Dimensionality of the goal representation.
             # Dataset hyperparameters.
-            dataset_class='GCDataset',  # Dataset class name.
+            dataset_class="GCDataset",  # Dataset class name.
             oraclerep=False,  # Whether to use oracle goal representations.
             norm=False,  # Whether to use dataset normalization.
             value_p_curgoal=0.2,  # Probability of using the current state as the value goal.
@@ -307,7 +373,9 @@ def get_config():
             rep_geom_sample=True,  # Whether to use geometric sampling for future representation goals.
             gc_negative=True,  # Whether to use '0 if s == g else -1' (True) or '1 if s == g else 0' (False) as reward.
             p_aug=0.0,  # Probability of applying image augmentation.
-            frame_stack=ml_collections.config_dict.placeholder(int),  # Number of frames to stack.
+            frame_stack=ml_collections.config_dict.placeholder(
+                int
+            ),  # Number of frames to stack.
         )
     )
     return config

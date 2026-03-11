@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 from datetime import datetime
 
@@ -19,17 +20,29 @@ class CsvLogger:
         self.disallowed_types = (wandb.Image, wandb.Video, wandb.Histogram)
 
     def log(self, row, step):
-        row['step'] = step
+        row["step"] = step
         if self.file is None:
-            self.file = open(self.path, 'w')
+            self.file = open(self.path, "w")
             if self.header is None:
-                self.header = [k for k, v in row.items() if not isinstance(v, self.disallowed_types)]
-                self.file.write(','.join(self.header) + '\n')
-            filtered_row = {k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)}
-            self.file.write(','.join([str(filtered_row.get(k, '')) for k in self.header]) + '\n')
+                self.header = [
+                    k
+                    for k, v in row.items()
+                    if not isinstance(v, self.disallowed_types)
+                ]
+                self.file.write(",".join(self.header) + "\n")
+            filtered_row = {
+                k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)
+            }
+            self.file.write(
+                ",".join([str(filtered_row.get(k, "")) for k in self.header]) + "\n"
+            )
         else:
-            filtered_row = {k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)}
-            self.file.write(','.join([str(filtered_row.get(k, '')) for k in self.header]) + '\n')
+            filtered_row = {
+                k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)
+            }
+            self.file.write(
+                ",".join([str(filtered_row.get(k, "")) for k in self.header]) + "\n"
+            )
         self.file.flush()
 
     def close(self):
@@ -37,15 +50,34 @@ class CsvLogger:
             self.file.close()
 
 
-def get_exp_name(env_name, agent_name, seed):
+def _normalize_tags(tags):
+    """Normalize user-provided tags for W&B and filesystem-safe names."""
+    if not tags:
+        return []
+
+    cleaned_tags = []
+    for tag in tags:
+        if tag is None:
+            continue
+        normalized = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(tag).strip())
+        normalized = normalized.strip("-_.")
+        if normalized:
+            cleaned_tags.append(normalized)
+    return cleaned_tags
+
+
+def get_exp_name(env_name, agent_name, seed, tags=None):
     """Return the experiment name."""
-    exp_name = f'{env_name}_{agent_name}_sd{seed:03d}'
+    exp_name = f"{env_name}_{agent_name}_sd{seed:03d}"
+    normalized_tags = _normalize_tags(tags)
+    if normalized_tags:
+        exp_name = f"{exp_name}_{'-'.join(normalized_tags)}"
     return exp_name
 
 
 def get_flag_dict():
     """Return the dictionary of flags."""
-    flag_dict = {k: getattr(flags.FLAGS, k) for k in flags.FLAGS if '.' not in k}
+    flag_dict = {k: getattr(flags.FLAGS, k) for k in flags.FLAGS if "." not in k}
     for k in flag_dict:
         if isinstance(flag_dict[k], ml_collections.ConfigDict):
             flag_dict[k] = flag_dict[k].to_dict()
@@ -54,26 +86,29 @@ def get_flag_dict():
 
 def setup_wandb(
     entity=None,
-    project='project',
+    project="project",
     group=None,
     name=None,
-    mode='online',
+    mode="online",
+    tags=None,
 ):
     """Set up Weights & Biases for logging."""
     wandb_output_dir = tempfile.mkdtemp()
-    tags = [group] if group is not None else None
+    run_tags = _normalize_tags(tags)
+    if group is not None and group not in run_tags:
+        run_tags.insert(0, group)
 
     init_kwargs = dict(
         config=get_flag_dict(),
         project=project,
         entity=entity,
-        tags=tags,
+        tags=run_tags if run_tags else None,
         group=group,
         dir=wandb_output_dir,
         name=name,
         reinit="finish_previous",
         settings=wandb.Settings(
-            start_method='thread',
+            start_method="thread",
             _disable_stats=True,
         ),
         mode=mode,
@@ -132,9 +167,14 @@ def get_wandb_video(renders=None, n_cols=None, fps=15):
         renders[i] = np.concatenate([render, pad], axis=0)
 
         # Add borders.
-        renders[i] = np.pad(renders[i], ((0, 0), (1, 1), (1, 1), (0, 0)), mode='constant', constant_values=0)
+        renders[i] = np.pad(
+            renders[i],
+            ((0, 0), (1, 1), (1, 1), (0, 0)),
+            mode="constant",
+            constant_values=0,
+        )
     renders = np.array(renders)  # (n, t, h, w, c)
 
     renders = reshape_video(renders, n_cols)  # (t, c, nr * h, nc * w)
 
-    return wandb.Video(renders, fps=fps, format='mp4')
+    return wandb.Video(renders, fps=fps, format="mp4")
