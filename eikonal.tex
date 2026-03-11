@@ -1,0 +1,985 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, e.g.:
+\PassOptionsToPackage{numbers, sort&compress}{natbib}
+% before loading neurips_2025
+
+% ready for submission
+\usepackage[final]{neurips_2025}
+
+
+% to compile a preprint version, e.g., for submission to arXiv, add add the
+% [preprint] option:
+%     \usepackage[preprint]{neurips_2025}
+
+% to compile a camera-ready version, add the [final] option, e.g.:
+%     \usepackage[final]{neurips_2025}
+
+% to avoid loading the natbib package, add option nonatbib:
+%    \usepackage[nonatbib]{neurips_2025}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage[table]{xcolor}         % colors
+\usepackage{graphicx}
+\usepackage{wrapfig}
+
+% Attempt to make hyperref and algorithmic work together better:
+% \newcommand{\theHalgorithm}{\arabic{algorithm}}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+
+% For theorems and such
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+
+% custom packages
+\usepackage{bm}
+\usepackage{bbm}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{pifont}% http://ctan.org/pkg/pifont
+\newcommand{\cmark}{\ding{51}}%
+\newcommand{\xmark}{\ding{55}}%
+\usepackage{makecell}
+\usepackage{comment}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% THEOREMS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\title{Physics-informed Value Learner for Offline Goal-Conditioned Reinforcement Learning}
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+\author{%
+  Vittorio Giammarino, Ruiqi Ni and Ahmed H. Qureshi \\
+  Department of Computer Science\\
+  Purdue University\\
+  \texttt{\{vgiammar,ni117,ahqureshi\}@purdue.edu} 
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \AND
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+}
+
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+    Offline Goal-Conditioned Reinforcement Learning (GCRL) holds great promise for domains such as autonomous navigation and locomotion, where collecting interactive data is costly and unsafe. However, it remains challenging in practice due to the need to learn from datasets with limited coverage of the state-action space and to generalize across long-horizon tasks. To improve on these challenges, we propose a \emph{Physics-informed (Pi)} regularized loss for value learning, derived from the Eikonal Partial Differential Equation (PDE) and which induces a geometric inductive bias in the learned value function. Unlike generic gradient penalties that are primarily used to stabilize training, our formulation is grounded in continuous-time optimal control and encourages value functions to align with cost-to-go structures. The proposed regularizer is broadly compatible with temporal-difference-based value learning and can be integrated into existing Offline GCRL algorithms. When combined with Hierarchical Implicit Q-Learning (HIQL), the resulting method, Eikonal-regularized HIQL (Eik-HIQL), yields significant improvements in both performance and generalization, with pronounced gains in stitching regimes and large-scale navigation tasks. Code is available at \href{https://github.com/VittorioGiammarino/Eik-HIQL}{link}\footnote{https://github.com/VittorioGiammarino/Eik-HIQL}.
+\end{abstract}
+
+\section{Introduction}
+In recent years, many of the most effective machine learning paradigms have capitalized on vast amounts of unlabeled or weakly labeled data. Similarly, in dynamic systems learning, Offline Goal-Conditioned Reinforcement Learning (GCRL) has emerged as a pivotal framework, enabling the use of large-scale, multitask datasets without requiring explicit reward annotations. Specifically, Offline RL~\cite{lange2012batch, levine2020offline} leverages passively collected trajectories to learn control policies, offering great promise for applications such as autonomous navigation, locomotion, and manipulation, where interactive training is usually costly and unsafe. GCRL~\cite{kaelbling1993learning, schaul2015universal} extends this capability by enabling learning across diverse datasets without explicit rewards. Despite its potential, Offline GCRL faces significant challenges, including accurate Goal-Conditioned Value Function (GCVF) estimation from limited data, policy extraction from imperfect value functions, and generalization to unseen state-goal pairs~\cite{park2024value}. Among these issues, GCVF estimation remains the most fundamental, as improvements in this area can enhance both policy extraction and generalization, ultimately advancing the entire field of GCRL.
+
+Physics-informed (Pi) inductive biases, defined as structural constraints grounded in physical laws such as symmetry, conservation principles, or consistency with Partial Differential Equations (PDEs), provide a promising direction for enhancing GCVF estimation in the offline setting. As demonstrated in prior work~\cite{lienenhancing}, Pi methods can introduce physically or geometrically meaningful structure into the learned value function, enhancing both sample efficiency and generalization. In Fig.~\ref{fig:intro_pi_hiql_value_functions}, we illustrate a representative GCRL task in which an agent must navigate from various starting positions in a maze to a specified goal. Fig.~\ref{fig:intro_pi_hiql_value_functions}b shows the contour plot of a GCVF learned by a non-Pi state-of-the-art (SOTA) algorithm. The resulting value function fails to robustly encode obstacle constraints, leading to suboptimal policies that often fail to reach the goal. These limitations motivate the use of Pi regularizers as a principled means to incorporate structural priors into value learning, and thus improve GCVF estimation in complex environments.
+
+The primary contribution of this work is the introduction of an Eikonal regularizer for GCVF estimation in Offline GCRL tasks. Inspired by the Eikonal PDE~\cite{noack2017acoustic}, this regularizer imposes a distance-like cost-to-go structure on the learned GCVF, serving as an effective inductive bias during training. By enforcing this structure, the regularizer improves value estimation accuracy and promotes generalization to unseen states, while also reducing the number of required training steps compared to non-Pi approaches (see Fig.~\ref{fig:intro_pi_hiql_value_functions}a). In contrast to Hamilton-Jacobi-Bellman (HJB) PDE-based methods~\cite{lienenhancing}, which require explicit system dynamics and often suffer from numerical instability~\cite{munos1997convergent, munos1997reinforcement}, our method is model-free and easy to implement. Empirically, it outperforms both HJB-regularized and unregularized baselines while adding only minimal computational overhead.
+
+To validate the effectiveness of our Eikonal regularizer, we integrate it into the Hierarchical Implicit Q-Learning (HIQL) framework~\cite{park2024hiql}, a SOTA algorithm for Offline GCRL. We refer to this variant as Eik-HIQL. This choice is motivated by HIQL’s strong baseline performance, making it an ideal candidate to highlight the benefits of our approach. Importantly, the Eikonal regularizer is broadly compatible with other temporal-difference-based algorithms, as we further demonstrate empirically in Appendix~\ref{sec_app:additional_experiments}. Our evaluation, conducted on the challenging OGbench benchmark~\cite{park2024ogbench}, compares Eik-HIQL against Quasimetric RL (QRL)~\cite{wang2023optimal}, Contrastive RL (CRL)~\cite{eysenbach2022contrastive}, and the standard HIQL baseline. Eik-HIQL consistently outperforms or matches the baselines, achieving SOTA results in large-scale navigation and trajectory stitching scenarios. These gains underscore the utility of the Eikonal regularizer in enhancing GCVF estimation and overall Offline GCRL performance, with limited exceptions in tasks involving complex object interactions.
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\linewidth]{Figures/value_function_task_1_step_100000_antmaze_giant.pdf}
+    \put(-345,-15){(a) Eik-HIQL~(ours)}
+    \put(-145,-15){(b) HIQL~\cite{park2024hiql}}
+    \caption{Contour plots of the GCVF for \texttt{antmaze-giant-navigate-v0} in \cite{park2024ogbench}, learned after 100,000 training steps by our Physics-informed algorithm \textbf{Eik-HIQL}, and the standard \textbf{HIQL}. The plots are generated by varying the agent's center of mass $x$-$y$ coordinates while keeping all other states fixed. Recall that the policy $\pi$ is trained to move the agent in the direction that maximizes the GCVF. The effects of the Eikonal regularizer are evident in Fig.~\ref{fig:intro_pi_hiql_value_functions}a, where the contour plot closely follows the maze structure, in contrast to Fig.~\ref{fig:intro_pi_hiql_value_functions}b, where the learned GCVF ignores the maze structure.}
+    \label{fig:intro_pi_hiql_value_functions}
+    \vspace{-13pt}
+\end{figure*}
+
+\section{Related work}
+To the best of our knowledge, Pi regularization for value estimation has only recently been explored. Notably, \citet{lienenhancing} propose an Offline RL objective derived from the HJB equation in continuous-time optimal control~\cite{munos1997convergent, munos1997reinforcement}, aiming to enforce first-order derivative consistency within the critic network. In contrast, we introduce a simpler, model-free Pi regularizer for GCVF learning, based on the residual of the Eikonal PDE. We show that this regularizer induces a distance-like structure in the value function and integrates naturally into standard temporal-difference-based GCRL pipelines.
+
+While gradient norm penalties, closely related to the Eikonal PDE residual, have been employed in generative modeling~\cite{gulrajani2017improved} and, more recently, in model-based RL to regularize Q-functions and mitigate overfitting~\cite{zheng2023model}, their application in GCRL remains, to our knowledge, unexplored. In contrast to these prior methods, which primarily aim to stabilize training, our regularizer is designed to inject a structural inductive bias into the GCVF, thereby improving sample efficiency and generalization. To the best of our knowledge, this work presents the first use of the Eikonal PDE as a regularization objective in value-based RL, and its first practical deployment in the Offline GCRL setting. More broadly, there has been a growing interest in incorporating physical priors and geometric, distance-like structures into RL algorithms, especially in model-based or Koopman-inspired frameworks~\cite{weissenbacher2022koopman, cheng2023look}. These approaches typically leverage the Koopman operator, which assumes access to (or approximations of) the underlying system dynamics, and may incorporate structural information such as reversibility or symmetry of the dynamics. In contrast, our method operates directly on the GCVF in a fully model-free setting. 
+
+In parallel, the use of non-Pi constraints for value learning has been extensively studied in Offline RL. Many approaches constrain learned policies to remain close to the behavior policy, either through explicit density modeling~\cite{wu2019behavior, fujimoto2019off, kumar2019stabilizing} or implicit divergence constraints~\cite{wang2020critic, peng2019advantage}. Others directly regularize the Q-function to assign low values to out-of-distribution actions and improve robustness~\cite{kostrikov2021offline, kumar2020conservative}.
+
+Our work is also closely related to the literature on GCRL~\cite{kaelbling1993learning, schaul2015universal}. Eik-HIQL extends HIQL~\cite{park2024hiql} by integrating the Eikonal regularizer into the GCVF estimation loss. HIQL itself combines hierarchical actors~\cite{sutton1999between, giammarino2021online} with Implicit Q-Learning~\cite{kostrikov2021offline}. Other GCRL methods include hindsight relabeling~\cite{andrychowicz2017hindsight}, contrastive representation learning~\cite{eysenbach2022contrastive}, state-occupancy matching~\cite{ma2022offline}, and quasimetric RL~\cite{wang2023optimal}.
+Offline GCRL has also been studied through the lens of goal-conditioned supervised learning (GCSL)~\cite{chebotar2021actionable, yang2022rethinking}, where goal-reaching policies are trained via conditional imitation or regression. Recent work has analyzed the out-of-distribution goal generalization problem~\cite{yang2023essential} and addressed GCSL via self-supervised reward shaping~\cite{mezghani2023learning} and occupancy-based score modeling~\cite{sikchi2023smore}. 
+
+Beyond RL, Pi losses and neural networks (NNs) have been widely applied to learn parameterizations of PDEs such as Burgers, Schrödinger, and Navier–Stokes equations~\cite{rudy2017data, raissi2019physics}. These methods leverage automatic differentiation to estimate derivatives with respect to NN inputs and solve high-dimensional PDEs. The Eikonal PDE, in particular, has been used in seismology~\cite{smith2020eikonet} and motion planning~\cite{nintfields, anonymous2025physicsinformed}, where distance fields provide essential geometric structure. In this work, we extend the use of the Eikonal PDE to the Offline GCRL domain, demonstrating how its distance-preserving properties enhance GCVF estimation, especially in large environments and when data stitching is required.
+
+\vspace{-0.0cm}
+\section{Preliminaries}
+\label{sec:Preliminarie}
+%Unless specified, we use uppercase letters (e.g., $S_t$) for random variables, lowercase letters (e.g., $s_t$) for values of random variables, script letters (e.g., $\mathcal{S}$) for sets, and bold lowercase letters (e.g., $\bm{\theta}$) for vectors. Finally, we denote with $\mathbb{E}[\cdot]$ expectation and $\mathbbm{1}(\cdot)$ the indicator function.
+
+\vspace{-0.0cm}
+\paragraph{Offline GCRL} We model the decision process as a finite-horizon discounted Markov Decision Process (MDP) described by the tuple $(\mathcal{S}, \mathcal{G}, \mathcal{A}, \mathcal{T}, \mathcal{R}, \mathcal{P}_g, \rho_0, \gamma)$ where $\mathcal{S}$ is the set of states, $\mathcal{G}$ is the set of goals, $\mathcal{A}$ is the set of actions, $\mathcal{T}:\mathcal{S} \times \mathcal{A} \to \mathcal{P}(\mathcal{S})$ is the transition probability function where $\mathcal{P}(\mathcal{S})$ denotes the space of probability distributions over $\mathcal{S}$, $\mathcal{R}:\mathcal{S} \times \mathcal{G} \to \mathbb{R}$ is a goal-conditioned reward function defined $\mathcal{R}(s,g)=-1$ when $s\neq g$ and $\mathcal{R}(s,g)=0$ otherwise, $\mathcal{P}_g \in \mathcal{P}(\mathcal{G})$ is the goal distribution, $\rho_0 \in \mathcal{P}(\mathcal{S})$ is the initial state distribution and $\gamma \in (0,1]$ is the discount factor. In this work, we assume the goal space $\mathcal{G}$ to be equivalent to the state space, i.e., $\mathcal{G} = \mathcal{S}$, and the goal $g$ is sampled according to $\mathcal{P}_g$ ($g \sim \mathcal{P}_g$) at the beginning of each episode. The learning agent's objective is to maximize the expected sum of discounted rewards $\mathcal{R}(s_t, g)$ to successfully reach $g$. Formally, this objective is expressed as $J(\pi) = \mathbb{E}_{\tau_{\pi}(g)}[\sum_{t=0}^{T} \gamma^t\mathcal{R}(s_t, g)]$ where $\tau_{\pi}(g) = (g, s_0, a_0, s_1, a_1, \dots, s_T)$ and $\pi: \mathcal{S} \times \mathcal{G} \to \mathcal{P}(\mathcal{A})$. Additionally, we define the GCVF induced by the policy $\pi$ as $V^{\pi}(s, g) = \mathbb{E}_{\tau_{\pi}(g)}[\sum_{t=0}^{T} \gamma^t \mathcal{R}(s_t, a_t, g)|S_0 = s, G = g]$ and the goal-conditioned state-action value function as $Q^{\pi}(s, a, g) = \mathbb{E}_{\tau_{\pi}(g)}[\sum_{t=0}^{T} \gamma^t \mathcal{R}(s_t, a_t, g)|S_0 = s, A_0 = a, G = g]$. In the offline setting, the learning agent must optimize $J(\pi)$ using only a static, offline dataset $\mathcal{D}$, which comprises trajectories of the form $\tau = (s_0, a_0, s_1, s_2, \dots, s_T)$. Finally, note that we write $\pi_{\bm{\theta}}$ when a function is parameterized with parameters $\bm{\theta} \in \varTheta \subset \mathbb{R}^k$.
+
+\vspace{-0.0cm}
+\paragraph{Hierarchical IQL} Our algorithm, Eik-HIQL, extends the Offline GCRL algorithm HIQL, as introduced by \citet{park2024hiql}. HIQL incorporates two key components: a GCVF estimation process that is robust to out-of-distribution actions and a hierarchical actor. The hierarchical actor comprises a high-level policy, $\pi^{hi}_{\bm{\theta}_{hi}}: \mathcal{S} \times \mathcal{G} \to \mathcal{S}$, which predicts subgoals, and a low-level policy, $\pi^{lo}_{\bm{\theta}_{lo}}:\mathcal{S} \times \mathcal{S} \to \mathcal{P}(\mathcal{A})$, which generates actions to achieve those subgoals. Robustness in the GCVF estimation step is enabled by an action-free variant of implicit $Q$-learning \cite{kostrikov2021offline}, inspired by \cite{xu2022policy, ghosh2023reinforcement}:
+\begin{align}
+    \begin{split}
+        \mathcal{L}_V(\bm{\theta}_V) =& \mathbb{E}_{(s,s') \sim \mathcal{D}, g \sim \mathcal{P}_g}\Big[L_2^{\iota}\big(\mathcal{R}(s,g) + \gamma V_{\bar{\bm{\theta}}_V} (s', g) - V_{\bm{\theta}_V} (s, g)\big)\Big],
+    \end{split}
+    \label{eq:expectile_regre_V_learning}
+\end{align}
+where $\bar{\bm{\theta}}_V$ denotes the parameters of the target GCVF network \cite{mnih2013playing} and $L_2^{\iota}(\cdot)$ represents the expectile loss function with $\iota \in [0.5, 1]$: $L_2^{\iota}(x) = |\iota - \mathbbm{1}(x < 0)|x^2$. In Eq.~\eqref{eq:expectile_regre_V_learning}, the expectile regression induced by $L_2^{\iota}(\cdot)$ replaces the $\max$ operator in the Bellman equation \cite{sutton2018reinforcement} with the goal of avoiding queries of out-of-distributions actions.
+The ability to properly handle overestimated values for out-of-distribution actions is a critical challenge in Offline RL, since, unlike in online RL, erroneous estimates cannot be corrected through environment interactions. The estimated GCVF is subsequently used to train the hierarchical actor where $\pi^{hi}_{\bm{\theta}_{hi}}(s_{t+k}| s_t, g)$ and $\pi^{lo}_{\bm{\theta}_{lo}}(a| s_t, s_{t+k})$ aim to maximize $V_{\bm{\theta}_V}(s_{t+k}, g)$ and $V_{\bm{\theta}_V}(s_{t+1}, s_{t+k})$, respectively. It is shown in \citet{park2024hiql} that this hierarchy, compared to the flat formulation using a single policy $\pi_{\bm{\theta}}(a| s_t, g)$, can better address low signal-to-noise ratios in the estimated GCVF.
+
+\vspace{-0.0cm}
+\paragraph{The Eikonal equation} 
+The Eikonal equation is a non-linear first-order PDE that describes wave propagation in heterogeneous media \cite{noack2017acoustic}. It is expressed in its general form as:
+\begin{equation}
+    ||\nabla_s T(s,g)||^2 = \frac{1}{S(s)^2},
+    \label{eq:eikonal}
+\end{equation}
+where $||\cdot||$ denotes the Euclidean norm, $T: \mathcal{S} \times \mathcal{G} \to \mathbb{R}$ represents the travel-time through the medium from the state $s$ to a goal location $g$ and $\nabla_s T(s,g)$ is the partial derivative of the travel-time $T$ with respect to $s$. The function $S: \mathcal{S} \to \mathbb{R}$ defines the speed profile of the medium in the state location $s$. As described in \cite{nintfields}, higher values for $S(s)$ lead to a low travel-time $T(s,g)$ from $s$ to $g$ and therefore to preferable paths $(s_0, s_1 \dots, s_T)$ compared to those with lower $S(s)$. Consequently, the solution to the Eikonal PDE in \eqref{eq:eikonal}, represented by the travel-time $T(s, g)$, reflects a cost-to-go structure. Minimizing $T(s, g)$ yields the shortest travel time from $s$ to $g$, as determined by the speed profile $S(s)$. In other words, $T(s,g)$ encodes a GCVF for a specific class of optimal control problems. We formally establish this connection in the next section. In our method, we propose a regularizer, inspired by the Eikonal PDE in \eqref{eq:eikonal}, with the goal of providing an additional distance-like structure to the learned GCVF. Under smooth dynamics assumptions, we demonstrate that our regularizer significantly improves performance over the SOTA baselines while adding minimal complexity.    
+
+\vspace{-0.0cm}
+\section{Physics-informed Eikonal regularizer}
+\vspace{-0.0cm}
+In this section, we first relate the Eikonal PDE in \eqref{eq:eikonal} to the HJB equation~\cite{munos1997convergent, munos1997reinforcement} for continuous-time, undiscounted optimal control. This connection draws parallels to prior studies such as \citet{lienenhancing}, offering additional motivation for our regularizer and insights into its empirical effectiveness. We then introduce the Eikonal-regularized loss for GCVF learning, which, when combined with a hierarchical actor, forms the core of our Eik-HIQL algorithm. Finally, we summarize the main components of Eik-HIQL.
+
+\vspace{-0.0cm}
+\paragraph{Optimal control perspective on the Eikonal PDE} We start our analysis by considering the following continuous-time dynamical system:
+\begin{equation*}
+    \dot{s}(t) = f(s(t), a(t)), \ \ \ t \geq 0,
+\end{equation*}
+where $s(t)$ denotes the state of the system at time $t$, $\dot{s}(t)$ its derivative and $a(t)$ the control action. The function $f(\cdot)$ represents the system dynamics, determining how the state evolves in response to the control action. As common in the literature, we assume $f(\cdot)$ to be a Lipschitz continuous function~\cite{kim2021hamilton}. Given the initial conditions $s(0) = s_0$, $a(0) = a_0$ and the goal $s(T) = g$, the undiscounted optimal control problem seeks to minimize 
+\begin{equation}
+    J = \int_0^T c(s(t), a(t))dt, 
+    \label{eq:J_cont}
+\end{equation}
+where $c(s(t), a(t))$ is the instantaneous cost function. The optimal value function $V(s,g)$ associated with $\eqref{eq:J_cont}$ is defined as
+\begin{equation*}
+    V(s, g) = \inf_{a(\cdot)} \int_0^T c(s(t), a(t))dt, 
+\end{equation*}
+and satisfies the principle of optimality
+\begin{equation}
+V(s, g) = \inf_{a \in \mathcal{A}}[c(s, a)\Delta t + V(s(t+\Delta t), g)], 
+\label{eq:principle_of_optimality}
+\end{equation}
+where $\Delta t$ is a small time step. Note that, unless otherwise specified, throughout this section we keep the standard continuous-time optimal control theory notation, where $V(s,g)$ is used in place of $V^*(s,g)$ to denote the optimal value function~\cite{fleming2006controlled}.
+
+Approximating $V(s(t+\Delta t), g)$ in \eqref{eq:principle_of_optimality} with its first-order Taylor expansion, $V(s(t+\Delta t), g) = V(s, g) + \nabla_s V(s,g)^{\intercal}f(s,a)\Delta t + O(\Delta t^2)$, and taking the limit $\Delta t \to 0$, we derive the following HJB equation:
+\begin{align}
+    \begin{split}
+        \inf_{a \in \mathcal{A}} [c(s, a) + \nabla_s V(s, g)^{\intercal}f(s,a)] = 0,
+        \label{eq:HJB}
+    \end{split}
+\end{align}
+which holds true at optimality. Refer to Appendix~\ref{sec_app:step_by_step} for the step-by-step derivations. The HJB equation in \eqref{eq:HJB} encodes the relationship between the system dynamics, the cost function, and the value function; where the left-hand side $H(s, g, \nabla_s V(s, g)) \equiv \inf_{a \in \mathcal{A}} [c(s, a) + \nabla_s V(s, g)^{\intercal}f(s,a)]$ is referred to as the Hamiltonian. The following proposition establishes the connection between the Hamiltonian and the Eikonal PDE in \eqref{eq:eikonal}, highlighting their equivalence under specific conditions.
+\begin{proposition}
+    \label{prop:HJB_Eik}
+    Given the Hamiltonian $H(s, g, \nabla_s V(s, g))$, the following inequality holds
+    \begin{equation}
+        H(s, g, \nabla_s V(s, g)) \equiv \inf_{a \in \mathcal{A}} [c(s, a) + \nabla_s V(s, g)^{\intercal}f(s,a)] \leq c^*(s) + ||\nabla_s V(s, g)|| F^*(s),
+        \label{eq:prop_ineq}
+    \end{equation}
+    where $c^*(s) = \inf_{a \in \mathcal{A}}c(s,a)$ and $F^*(s) = \sup_{a \in \mathcal{A}}||f(s,a)||$. In the special case in which $f(s,a) = a$, $||a||=1$ and $c(s,a)$ is constant over $||a||=1$ the Hamiltonian simplifies to
+    \begin{equation}
+        H(s, g, \nabla_s V(s, g)) = c^*(s) - ||\nabla_s V(s, g)||.
+        \label{eq:prop_eq}
+    \end{equation}
+    \begin{proof}
+        The inequality in \eqref{eq:prop_ineq} follows from using the Cauchy-Schwarz inequality on the inner product $\nabla_s V(s, g)^{\intercal}f(s,a)$ in \eqref{eq:HJB}. Using the definitions $F^*(s) = \sup_{a \in \mathcal{A}}||f(s,a)||$ and  $c^*(s) = \inf_{a \in \mathcal{A}}c(s,a)$, we obtain the upper bound in \eqref{eq:prop_ineq}. For the equality in \eqref{eq:prop_eq}, when $c(s,a)$ is constant over $||a||=1$, the inner product $\nabla_s V(s, g)^{\intercal}f(s,a)$ attains its minimal value when $a$ points in the direction opposite to $\nabla_s V(s, g)$. Specifically, this occurs when $a^* = \arg\inf_{||a||=1} \nabla_s V(s, g)^{\intercal}f(s,a) = -\nabla_s V(s, g)/||\nabla_s V(s, g)||$. Substituting $f(s,a) = a^*$ into the Hamiltonian in \eqref{eq:prop_ineq} and simplifying yields the result in \eqref{eq:prop_eq}. Refer to Appendix~\ref{sec_app:step_by_step} for the full proof.
+    \end{proof}
+\end{proposition}
+\begin{remark}[Connection between HJB and Eikonal residuals]
+    Proposition~\ref{prop:HJB_Eik} shows that, even without assumptions on the dynamics, the Hamiltonian \( H(s, g, \nabla_s V(s, g)) \) is upper-bounded by an Eikonal-like residual, where the ratio \( F^*(s) / c^*(s) \) defines a local speed profile \( S(s) \) as in~\eqref{eq:eikonal}. In the special case of isotropic dynamics with \( f(s,a) = a \), \( \|a\| = 1 \), and constant cost, the Hamiltonian reduces exactly to the Eikonal PDE with \( S(s) = 1 / c^*(s) \). Thus, while the HJB PDE formalizes cost-to-go under known dynamics, the Eikonal PDE captures a related spatial structure through \( S(s) \), making it a natural approximation when dynamics are unknown.
+\end{remark}
+
+\begin{remark}[Why the Eikonal residual helps in Offline GCRL]
+\label{remark_crucial}
+    Temporal-difference learning (e.g., \eqref{eq:expectile_regre_V_learning}) is known to converge to the optimal GCVF \( V^* \) under ideal conditions: namely, on-policy data and an infinite sample budget~\cite{sutton2018reinforcement}. However, these assumptions are often violated in the offline setting, where biased datasets and long-horizon tasks exacerbate extrapolation error and limit generalization~\cite{park2024hiql}. In this context, the Eikonal residual in Eq.~\eqref{eq:prop_eq} can play a crucial role by introducing a geometric inductive bias that encourages the learned value function to behave like a distance field, through the constraint \( \|\nabla_s V_{\bm{\theta}}(s, g)\| \approx c(s) \). This regularization is particularly effective when the true \( V^* \) is Lipschitz continuous, i.e., in environments where the dynamics do not induce sharp discontinuities~\cite{banjanin2019nonsmooth}. Under such conditions, the Eikonal residual shapes the gradient norm of the learned GCVF \( V_{\bm{\theta}} \) to match the local structure of \( V^* \), up to a scaling factor. This effect is supported by Rademacher's theorem~\cite{heinonen2005lectures}, which guarantees that Lipschitz continuous functions are differentiable almost everywhere, with \( \|\nabla_s V^*(s, g)\| \leq L \), where \( L \) is the minimal Lipschitz constant. As a result, when $V^*$ is Lipschitz continuous, the Eikonal residual in Eq.~\eqref{eq:prop_eq} provides a principled inductive bias that, as we empirically demonstrate, improves both sample efficiency and generalization, particularly in long-horizon tasks with smooth dynamics.
+\end{remark}
+
+%\vspace{-0.1cm}
+Furthermore, in practice, the Eikonal residual offers a tractable alternative to HJB regularization in model-free settings where the dynamics \( f(s,a) \) are unknown. Prior work~\cite{lienenhancing} approximates the HJB term using finite differences, i.e., \( f(s,a) \approx s' - s \), but our experiments show no clear advantage over the simpler Eikonal residual regularization. Moreover, note that, while the HJB equation in Eq.~\eqref{eq:HJB} holds only at optimality, the inequality in Proposition~\ref{prop:HJB_Eik} remains valid throughout training, providing consistent structural guidance even when \( V \) is suboptimal.
+
+
+\vspace{-0.1cm}
+\paragraph{Eikonal-regularized implicit $V$-learning}
+Based on the upper-bound in Proposition~\ref{prop:HJB_Eik} and the discussion in Remark~\ref{remark_crucial}, we propose the following Eikonal-regularized implicit $V$-learning loss for GCVF estimation: 
+\begin{align}
+    \begin{split}
+        \mathcal{L}_V(\bm{\theta}_V) =& \mathbb{E}_{(s,s') \sim \mathcal{D}, g \sim \mathcal{P}_g}\Big[L_2^{\iota}\big(\mathcal{R}(s,g) + \gamma V_{\bar{\bm{\theta}}_V} (s', g) - V_{\bm{\theta}_V}(s, g)\big) 
+    \end{split}\label{eq:Eik_reg_expectile_regre_V_learning} \\ 
+    &+ \big(||\nabla_s V_{\bm{\theta}_V}(s, g)|| \cdot S(s) - 1\big)^2\Big],
+    \label{eq:Eik_reg}
+\end{align}
+where the term in \eqref{eq:Eik_reg_expectile_regre_V_learning} corresponds to the expectile regression in \eqref{eq:expectile_regre_V_learning} (cf. \cite{park2024hiql}) and \eqref{eq:Eik_reg} is our Eikonal regularizer. In \eqref{eq:Eik_reg}, $||\nabla_s V_{\bm{\theta}_V}(s, g)||$ is the Euclidean norm of the GCVF gradient with respect to its input $s$ and $S(s)$ is a pre-specified speed profile that maps states to scalar values (see Preliminaries in Section~\ref{sec:Preliminarie}). The term $\nabla_s V_{\bm{\theta}_V}(s, g)$ is computed via automatic differentiation, following standard approaches in PiNNs (see Algorithm~\ref{alg:grad_V} in Appendix~\ref{sec:app_psuedocode_hyperparam}). The speed profile $S(s)$ is designed such that it encapsulates additional biases or task-specific information into the Eikonal regularizer \cite{nintfields}. We demonstrate in our experiments that the simple choice of $S(s)=1$ works best in practice; however, we believe that more interesting designs might further improve collision avoidance in cluttered environments and consequently enhance both safety and performance. We defer this direction on Pi Safe GCRL to future work. Finally, note that in \eqref{eq:Eik_reg}, with respect to the upper bound in \eqref{eq:prop_ineq}, we set $c^*(s) = -1$ and opt to multiply $S(s)$ with $||\nabla_s V_{\bm{\theta}_V}(s, g)||$ rather than using $c^*(s) = -1/S(s)$ as in \eqref{eq:eikonal}. This in order to ensure numerical stability. 
+
+As discussed in Remark~\ref{remark_crucial}, the effectiveness of the regularization in Eq.~\eqref{eq:Eik_reg} stems from the geometric structure of the Eikonal PDE, whose solution defines a signed distance field~\cite{nintfields, smith2020eikonet}. In our final formulation, we uniformly set the speed profile to \( S(s) = 1 \), corresponding to the constraint \( \|\nabla_s V_{\bm{\theta}_V}(s, g)\| \approx 1 \) across the feasible state space. By Rademacher’s theorem~\cite{heinonen2005lectures}, this enforces 1-Lipschitz continuity almost everywhere, encouraging smoother and more generalizable value estimates even under limited offline data coverage. Although the true optimal value function \( V^* \) may not be exactly 1-Lipschitz over the entire feasible space, we show in our experiments (Section~\ref{sec:experiments}) that this regularization remains effective in practice. Note that using a different constant \( S(s) > 0 \) everywhere in the feasible space would simply uniformly rescale the value function without affecting its shape. Consequently, since policy gradients are invariant to such rescaling~\cite{sutton1999policy, schulman2015trust, sutton2018reinforcement}, this design choice has no impact on the induced policy. 
+
+\vspace{-0.0cm}
+\paragraph{Eikonal-regularized HIQL} In the following, we provide a brief summary of our algorithm, Eik-HIQL. During training, Eik-HIQL performs an Eikonal-regularized value estimation step, where the loss in \eqref{eq:Eik_reg_expectile_regre_V_learning}-\eqref{eq:Eik_reg} is minimized to learn a GCVF. This is followed by a policy extraction step, in which the hierarchical actor introduced in \citet{park2024hiql} (see Preliminaries in Section~\ref{sec:Preliminarie}) is trained based on the estimated GCVF. The full pseudo-code for Eik-HIQL as well as a JAX~\cite{jax2018github} implementation showing how to compute the gradient $\nabla_s V_{\bm{\theta}_V}$ in \eqref{eq:Eik_reg} are provided in Appendix~\ref{sec:app_psuedocode_hyperparam}, respectively Algorithm~\ref{alg:Eik-HIQL} and Algorithm~\ref{alg:grad_V}. For the full implementation of Eik-HIQL refer to our \href{https://anonymous.4open.science/r/Pi-HIQL-F8F3/README.md}{GitHub repository}.
+
+\vspace{-0.0cm}
+\section{Experiments}
+\vspace{-0.0cm}
+\label{sec:experiments}
+\begin{figure}[ht!]
+    \centering
+    \begin{subfigure}[t]{0.15\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{Figures/pointmaze.png}
+        \caption{\texttt{pointmaze}}
+        \label{fig:pointmaze}
+    \end{subfigure}
+    ~
+    \begin{subfigure}[t]{0.15\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{Figures/antmaze.png}
+        \caption{\texttt{antmaze}}
+        \label{fig:antmaze}
+    \end{subfigure}
+    ~
+    \begin{subfigure}[t]{0.15\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{Figures/humanoidmaze.png}
+        \caption{\texttt{humanoid-} \texttt{maze}}
+        \label{fig:humanoidmaze}
+    \end{subfigure}
+    ~
+    \begin{subfigure}[t]{0.15\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{Figures/antsoccer.png}
+        \caption{\texttt{antsoccer}}
+        \label{fig:antsoccer}
+    \end{subfigure}
+    ~
+    \begin{subfigure}[t]{0.15\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{Figures/cube-single.png}
+        \caption{\texttt{cube}}
+        \label{fig:cube}
+    \end{subfigure}
+    ~
+    \begin{subfigure}[t]{0.15\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{Figures/scene-v0_task4.jpg}
+        \caption{\texttt{scene}}
+        \label{fig:scene}
+    \end{subfigure}
+    \caption{Environments from OGbench~\cite{park2024ogbench} used in our experiments. These include a variety of goal-conditioned tasks spanning navigation and locomotion (e.g., \texttt{pointmaze}, \texttt{antmaze}, \texttt{humanoidmaze}), contact-rich locomotion (\texttt{antsoccer}), and contact-rich manipulation (\texttt{cube}, \texttt{scene}). The environments differ significantly in dynamics complexity, dimensionality, and task structure, providing a comprehensive testbed for evaluating Offline GCRL algorithms.}
+    \label{fig:environments}
+    \vspace{-6pt}
+\end{figure}
+
+In this section, we analyze the effects of the Eikonal regularizer in \eqref{eq:Eik_reg} on the GCVF estimation problem. Specifically, we will perform an ablation over different designs of speed profiles $S(s)$, compare the Eikonal regularizer with an HJB regularizer, and analyze value functions learned with and without our Eikonal term. Then, we compare the performance obtained by our Eikonal-regularized algorithm, Eik-HIQL, against the SOTA algorithms for Offline GCRL. Finally, we will also present the limitations of our approach. The experiments in this section are conducted on the environments in Fig.~\ref{fig:environments}. A table summarizing the most relevant hyperparameter values is provided in Appendix~\ref{sec:app_psuedocode_hyperparam}.  
+
+\vspace{-0.0cm}
+\paragraph{Speed profiles and HJB regularizer comparison} 
+
+\begin{table}
+\centering
+\scriptsize
+\caption{Summary of the speed profiles ablation. All agents are trained for \textbf{100,000 training steps} using 10 seeds. We report the mean and standard deviation across seeds for the best evaluation achieved during training. For each seed, evaluations are conducted over $5$ different random goals, as designed in \citet{park2024ogbench}, with the learned policy tested for $50$ episodes per goal. Results within $95\%$ of the best value are written in \textbf{bold}.}
+\label{tab:speed_ablation}
+    \begin{tabular}{l l l c c c c}
+        \toprule
+        \textbf{Environment} & \textbf{Dataset Type} & \textbf{Maze Dimension} & \textbf{Eik-HIQL} & \textbf{Eik-HIQL Exp~\eqref{eq:exp_speed}} & \textbf{Eik-HIQL Lin~\eqref{eq:linear_speed}} & \textbf{HJB-HIQL~\eqref{eq:HJB_regularizer}} \\
+        \cmidrule(lr){1-7}
+        \multirow{8}{*}{\texttt{pointmaze}} & \multirow{4}{*}{\texttt{navigate}} & \texttt{medium} & \bm{$94 \pm 4$} & \bm{$95 \pm 2$} & \bm{$93 \pm 4$} & $90 \pm 6$ \\
+        & & \texttt{large} & \bm{$83 \pm 9$} & $61 \pm 8$ & $60 \pm 5$ & $53 \pm 9$ \\
+        & & \texttt{giant} & \bm{$79 \pm 13$} & $38 \pm 15$ & $42 \pm 12$ & $9 \pm 8$ \\
+        & & \texttt{teleport} & \bm{$47 \pm 10$} & $39 \pm 7$ & $40 \pm 6$ & $18 \pm 5$ \\
+        \cmidrule(lr){2-7}
+        & \multirow{4}{*}{\texttt{stitch}} & \texttt{medium} & \bm{$97 \pm 2$} & $90 \pm 9$ & $85 \pm 10$ & $64 \pm 13$ \\
+        & & \texttt{large} & \bm{$73 \pm 6$} & $33 \pm 17$ & $41 \pm 7$ & $6 \pm 7$ \\
+        & & \texttt{giant} & \bm{$22 \pm 10$} & $5 \pm 8$ & $2 \pm 3$ & $0 \pm 0$ \\
+        & & \texttt{teleport} & \bm{$44 \pm 9$} & \bm{$43 \pm 5$} & $38 \pm 7$ & $18 \pm 8$  \\
+        \bottomrule
+    \end{tabular}
+    %\vspace{-12pt}
+\end{table}
+
+Recall that our algorithm, \textit{Eik-HIQL}, estimates the GCVF using the loss defined in Eqs.~\eqref{eq:Eik_reg_expectile_regre_V_learning}-\eqref{eq:Eik_reg}, where the speed profile $S(s)$ encodes task-specific structure into the Eikonal regularizer. We perform an ablation over different choices of $S(s)$ and find the simple constant setting $S(s) = 1$ to be particularly effective. It outperforms more complex alternatives that require explicit knowledge of obstacle coordinates, which may not be available in practice. Specifically, we compare $S(s) = 1$ against the following two speed profiles:
+\begin{align}
+    \begin{split}
+        S_{\text{exp}}(s) =& S_{\text{min}} + (1 - S_{\text{min}})\exp\left(-\lambda\frac{d_{\text{max}} - d(s)}{d_{\text{max}} - d_{\text{min}}}\right),    
+    \end{split} \label{eq:exp_speed} \\
+    S_{\text{lin}}(s) =& \text{clip}\left(\frac{d(s)}{d_{\text{max}}}, \frac{d_{\text{min}}}{d_{\text{max}}}, 1.0\right), \label{eq:linear_speed}
+\end{align}
+where $\lambda$ is a decay rate, $S_{\text{min}}$ represents the minimum tolerable speed, $d_{\text{min}}$ and $d_{\text{max}}$ are respectively the minimum and maximum tolerable distances of a state $s$ from its nearest obstacle and $d(s)$ is a function $d:\mathcal{S} \to \mathbb{R}$ describing the Euclidean distance of the state $s$ from its nearest obstacle (see Appendix~\ref{app_sec:speed_ablation} for more information). We refer to $S_{\text{exp}}(\cdot)$ in \eqref{eq:exp_speed} as the exponential speed profile (\textit{Eik-HIQL Exp} in Table~\ref{tab:speed_ablation}) and to $S_{\text{lin}}(\cdot)$ in \eqref{eq:linear_speed}, originally introduced in \cite{nintfields}, as the linear speed profile (\textit{Eik-HIQL Lin} in Table~\ref{tab:speed_ablation}). Both \eqref{eq:exp_speed} and \eqref{eq:linear_speed} assign high speed values to states $s$ far from obstacles, and low speed values to states near obstacles. This encourages the agent to avoid obstacles, as proximity to them results in longer travel-time from $s$ to $g$. Moreover, due to the use of the $\exp(\cdot)$ function, when compared to $S_{\text{lin}}(\cdot)$; $S_{\text{exp}}(\cdot)$ ensures a smoother decay of the speed value as the distance from the obstacles decreases \cite{ni2024physics}. Finally, note that, in both these speed profiles, computing $d(s)$ requires knowledge of the obstacles' coordinates which represents a strong assumption in some settings. In addition to this ablation, we also compare our Eikonal regularization term in \eqref{eq:Eik_reg} with an HJB regularizer derived from the HJB PDE in \eqref{eq:HJB}:
+\begin{align}
+    \begin{split}
+        \mathcal{L}^{\text{HJB}}_V(\bm{\theta}_V) = \mathbb{E}_{(s,s') \sim \mathcal{D}, g \sim \mathcal{P}_g}\Big[\left(\nabla_s V_{\bm{\theta}_V}(s, g)^{\intercal}(s'-s) - 1 \right)^2\Big].
+    \end{split}\label{eq:HJB_regularizer}
+\end{align}
+In \eqref{eq:HJB_regularizer}, the dynamics $f(s,a)$, originally required by the HJB PDE in \eqref{eq:HJB}, is replaced by a finite difference term $(s'-s)$ as proposed by \citet{lienenhancing}. The term in \eqref{eq:HJB_regularizer} is then used in place of the Eikonal regularizer in \eqref{eq:Eik_reg} for GCVF estimation in Eik-HIQL. We refer to this approach as \textit{HJB-HIQL} in Table~\ref{tab:speed_ablation}. The results for these experiments are summarized in Table~\ref{tab:speed_ablation} and all the learning curves are available in Appendix~\ref{sec:app_learning_curves}.
+
+Two main observations explain the superior performance of the simple choice $S(s) = 1$. First, in Offline GCRL, sampled trajectories are already constrained to the feasible space, and there is no explicit penalty for colliding with obstacles during learning. As such, complex speed profiles incorporating obstacle proximity provide limited additional benefit over the uniform case. Second, the simplicity of $S(s) = 1$ enables more efficient and stable learning of the GCVF, whereas profiles requiring privileged information (e.g., obstacle maps) may introduce unnecessary complexity. Our choice of $S(s) = 1$ also aligns with standard practice in the literature, which commonly adopts uniform speed profiles to model wavefront propagation in the feasible state space~\cite{sethian1996fast, nintfields}. This also ensures a fair comparison with the Offline GCRL baselines, as none of them leverage privileged information. Furthermore, we provide visualizations for the learned GCVF in Appendix~\ref{app_sec:speed_ablation}, where contour plots for \texttt{pointmaze-giant-stitch-v0} illustrate that \textit{Eik-HIQL} with $S(s)=1$ learns a more structured and accurate value function, closely aligning with the maze layout. In contrast, \textit{Eik-HIQL Exp} and \textit{Eik-HIQL Lin} display artifacts even near the goal, while \textit{Eik-HIQL HJB} fails to recover the maze geometry altogether. Based on this empirical evidence, and to ensure a fair comparison with baselines, we adopt the constant speed profile $S(s)=1$ in all subsequent experiments. Nonetheless, we highlight that in the context of Safe GCRL, where value functions must encode both safety and task performance, investigating how different choices of $S(s)$ influence the shape and behavior of the GCVF represents an interesting direction for future work.
+
+\begin{wrapfigure}{r}{0.645\textwidth}
+\centering
+\vspace{-13pt}
+\begin{minipage}[t]{0.645\textwidth}
+\tiny
+\captionof{table}{Complete comparison between Eik-HiQRL and the Offline GCRL baselines. Agents are trained for \textbf{100,000 steps} on \texttt{pointmaze} tasks and \textbf{1 million steps} on the remaining tasks, each using 10 seeds. The evaluation follows the methodology described in Table~\ref{tab:speed_ablation}. We report the mean and standard deviation across seeds for the best evaluation achieved during training. Results within $95\%$ of the best value are written in \textbf{bold}, and rows are \colorbox{lime}{highlighted} when the Eikonal regularizer improves performance by $100\%$ or more compared to the non-regularized HIQL performance.}
+\label{tab:full_offline_GCRL}
+    \begin{tabular}{p{1.1cm} p{0.7cm} p{0.7cm} p{0.95cm} p{0.9cm} p{0.9cm} p{0.8cm}}
+        \toprule
+        \textbf{Environment} & \textbf{Dataset} & \textbf{Dim} & \textbf{Eik-HIQL} & \textbf{HIQL} & \textbf{QRL} & \textbf{CRL} \\
+        \cmidrule(lr){1-7}
+        \multirow{8}{*}{\texttt{pointmaze}} & \multirow{4}{*}{\texttt{navigate}} & \texttt{medium} & \bm{$93 \pm 5$} & \bm{$92 \pm 2$} & $83 \pm 3$ & $54 \pm 19$ \\
+        & & \texttt{large} & $83 \pm 9$ & $49 \pm 13$ & \bm{$90 \pm 5$} & $56 \pm 9$ \\
+        & & \texttt{giant} & \cellcolor{lime}\bm{$79 \pm 13$} & \cellcolor{lime}$7 \pm 8$ & $72 \pm 7$ & $37 \pm 17$ \\
+        & & \texttt{teleport} & \bm{$47 \pm 10$} & $29 \pm 7$ & $34 \pm 7$ & \bm{$50 \pm 5$} \\
+        \cmidrule(lr){2-7}
+        & \multirow{4}{*}{\texttt{stitch}} & \texttt{medium} & \bm{$96 \pm 3$} & $76 \pm 8$ & $80 \pm 10$ & $3 \pm 5$ \\
+        & & \texttt{large} & \cellcolor{lime}$73 \pm 6$ & \cellcolor{lime}$19 \pm 7$ & \bm{$85 \pm 11$} & $4 \pm 6$ \\
+        & & \texttt{giant} & \cellcolor{lime}$22 \pm 10$ & \cellcolor{lime}$1 \pm 4$ & \bm{$56 \pm 9$} & $0 \pm 0$ \\
+        & & \texttt{teleport} & \bm{$43 \pm 9$} & $38 \pm 5$ & \bm{$42 \pm 6$} & $12 \pm 6$ \\
+        \cmidrule(lr){1-7}
+        \multirow{11}{*}{\texttt{antmaze}} & \multirow{4}{*}{\texttt{navigate}} & \texttt{medium} & \bm{$95 \pm 1$} & \bm{$96 \pm 1$} & $87 \pm 5$ & \bm{$94 \pm 2$} \\
+        & & \texttt{large} & \bm{$86 \pm 2$} & \bm{$90 \pm 6$} & $80 \pm 5$ & \bm{$86 \pm 3$} \\
+        & & \texttt{giant} & \bm{$67 \pm 5$} & \bm{$69 \pm 3$} & $14 \pm 6$ & $18 \pm 4$ \\
+        & & \texttt{teleport} & \bm{$52 \pm 4$} & $43 \pm 3$ & $39 \pm 4$ & \bm{$55 \pm 4$} \\
+        \cmidrule(lr){2-7}
+        & \multirow{4}{*}{\texttt{stitch}} & \texttt{medium} & \bm{$94 \pm 2$} & \bm{$95 \pm 14$} & $68 \pm 6$ & $54 \pm 8$ \\
+        & & \texttt{large} & \bm{$84 \pm 3$} & $74 \pm 6$ & $24 \pm 5$ & $13 \pm 4$ \\
+        & & \texttt{giant} & \cellcolor{lime}\bm{$48 \pm 11$} & \cellcolor{lime}$3 \pm 3$ & $2 \pm 2$ & $0 \pm 0$ \\
+        & & \texttt{teleport} & \bm{$47 \pm 2$} & $35 \pm 3$ & $29 \pm 6$ & $34 \pm 4$ \\
+        \cmidrule(lr){2-7}
+        & \multirow{3}{*}{\texttt{explore}} & \texttt{medium} & \bm{$43 \pm 15$} & $33 \pm 15$ & $5 \pm 4$ & $4 \pm 2$ \\
+        & & \texttt{large} & \cellcolor{lime}\bm{$13 \pm 1$} & \cellcolor{lime}$6 \pm 7$ & $0 \pm 0$ & $0 \pm 0$ \\
+        & & \texttt{teleport} & $15 \pm 10$ & \bm{$45 \pm 5$} & $2 \pm 2$ & $22 \pm 5$ \\
+        \cmidrule(lr){1-7}
+        \multirow{6}{*}{\texttt{humanoidmaze}} & \multirow{3}{*}{\texttt{navigate}} & \texttt{medium} & \bm{$86 \pm 2$} & \bm{$90 \pm 3$} & $22 \pm 2$ & $61 \pm 4$ \\
+        & & \texttt{large} & \bm{$64 \pm 7$} & $50 \pm 4$ & $7 \pm 3$ & $22 \pm 9$ \\
+        & & \texttt{giant} & \cellcolor{lime}\bm{$68 \pm 5$} & \cellcolor{lime}$18 \pm 5$ & $1 \pm 1$ & $4 \pm 2$ \\
+        \cmidrule(lr){2-7}
+        & \multirow{3}{*}{\texttt{stitch}} & \texttt{medium} & $79 \pm 2$ & \bm{$88 \pm 3$} & $22 \pm 4$ & $40 \pm 7$ \\
+        & & \texttt{large} & \bm{$29 \pm 7$} & \bm{$28 \pm 2$} & $3 \pm 1$ & $4 \pm 2$ \\
+        & & \texttt{giant} & \cellcolor{lime}\bm{$19 \pm 5$} & \cellcolor{lime}$3 \pm 1$ & $0 \pm 0$ & $0 \pm 0$ \\
+        \cmidrule(lr){1-7}
+        \multirow{4}{*}{\texttt{antsoccer}} & \multirow{2}{*}{\texttt{navigate}} & \texttt{arena} & $19 \pm 2$  & \bm{$60 \pm 4$} & $10 \pm 3$ & $24 \pm 2$ \\
+        & & \texttt{medium} & $3 \pm 2$ & \bm{$13 \pm 3$} & $2 \pm 2$ & $4 \pm 2$\\
+        \cmidrule(lr){2-7}
+        & \multirow{2}{*}{\texttt{stitch}} & \texttt{arena} & $2 \pm 0$  & \bm{$17 \pm 3$} & $2 \pm 1$ & $1 \pm 1$ \\
+        & & \texttt{medium} & $1 \pm 0$ & \bm{$5 \pm 1$} & $0 \pm 0$ & $0 \pm 0$ \\
+        \cmidrule(lr){1-7}
+        \multirow{2}{*}{\texttt{manipulation}} & \multicolumn{2}{c}{\texttt{cube-single-play}} & $25 \pm 1$ & \bm{$31 \pm 4$} & $11 \pm 3$ & \bm{$32 \pm 2$} \\
+        \cmidrule(lr){2-7}
+        & \multicolumn{2}{c}{\texttt{scene-play}} & \bm{$52 \pm 7$} & \bm{$52 \pm 3$} & $8 \pm 2$ & $35 \pm 6$ \\
+        \bottomrule
+    \end{tabular}
+\end{minipage}
+\vspace{-14pt}
+\end{wrapfigure}
+
+\vspace{-0.3cm}
+\paragraph{Eik-HIQL vs HIQL} 
+We compare Eik-HIQL with its non-regularized counterpart, HIQL~\cite{park2024hiql}, to isolate the effect of the Eikonal regularizer. This comparison is conducted under tightly controlled conditions: both methods use identical network architectures, hyperparameters, and training pipelines, ensuring that the only difference lies in the presence of the regularizer. As shown in Table~\ref{tab:full_offline_GCRL}, Eik-HIQL consistently outperforms HIQL on navigation tasks, where the value function is typically Lipschitz continuous. The benefits are particularly pronounced in large mazes and stitching regimes, with improvements exceeding 100\% in 7 out of 31 evaluated tasks.
+
+Given the magnitude of these gains relative to the standard deviations across 10 random seeds, the improvements are both practically meaningful and statistically significant. Full learning curves for these experiments are provided in Appendix~\ref{sec:app_learning_curves}. These results highlight the robustness of the Eikonal regularizer in smooth environments and demonstrate its ability to enhance generalization in settings where HIQL struggles to scale. As illustrated in Fig.~\ref{fig:intro_pi_hiql_value_functions} for the \texttt{antmaze-navigate-giant-v0} task, Eik-HIQL produces a GCVF that reflects the underlying maze geometry, whereas HIQL fails to capture this structure, leading to poor goal-directed performance.
+
+By contrast, in interactive, contact-rich domains such as \texttt{antsoccer} and \texttt{manipulation}, where the dynamics (and consequently the value function) exhibit discontinuities, Eik-HIQL offers limited advantage. We defer a detailed discussion of these cases to the Limitations section below.
+
+\vspace{-0.0cm}
+\paragraph{Offline GCRL} 
+We extend our comparison to state-of-the-art Offline GCRL algorithms, including QRL~\cite{wang2023optimal} and CRL~\cite{eysenbach2022contrastive}, alongside HIQL. Results across all 31 tasks are summarized in Table~\ref{tab:full_offline_GCRL}, with full learning curves in Appendix~\ref{sec:app_learning_curves}. Eik-HIQL consistently outperforms all baselines in the most challenging settings, most notably in the \texttt{antmaze-stitch} tasks, which combine complex locomotion with, composite datasets, and in \texttt{humanoidmaze}, where high-dimensional states and unstable control amplify learning difficulty.
+
+QRL performs well in simpler domains such as \texttt{pointmaze}, where its quasimetric structure aids goal-conditioned estimation. CRL is competitive on several \texttt{navigate} variants, but struggles in high-dimensional and stitched tasks such as \texttt{humanoidmaze}. In contrast, Eik-HIQL demonstrates strong generalization and planning performance in both long-horizon and large-scale environments.
+
+In \texttt{antsoccer} and \texttt{manipulation}, however, Eik-HIQL performs comparably to the baselines. As mentioned, these domains involve discontinuous or contact-rich dynamics, and we do not observe consistent benefits from the Eikonal regularizer due to the fact that the imposed gradient condition does not hold globally at optimality throughout the entire state space. 
+
+
+\begin{wrapfigure}{r}{0.5\textwidth}
+    \centering
+    \vspace{-10pt}
+    \includegraphics[width=\linewidth]{Figures/antsoccer_contourplot.pdf}
+    \put(-175,-10){(a) Eik-HIQL}
+    \put(-85,-10){(b) HIQL}
+    % \begin{subfigure}[t]{0.45\linewidth}
+    %     \centering
+    %     \includegraphics[width=0.5\linewidth]{Figures/value_function_task_1_step_1000000_antsoccer_medium_pi_hiql.pdf}
+    %     \caption{Eik-HIQL.}
+    %     \label{fig:antsoccer_medium_pi_hiql}
+    % \end{subfigure}
+    % \begin{subfigure}[t]{0.45\linewidth}
+    %     \centering
+    %     \includegraphics[width=0.5\linewidth]{Figures/value_function_task_1_step_1000000_antsoccer_medium_hiql.pdf}
+    %     \caption{HIQL.}
+    %     \label{fig:antsoccer_medium_hiql}
+    % \end{subfigure}
+    \caption{Countour plots of the GCVF on \texttt{antsoccer-medium-navigate-v0} \cite{park2024ogbench}, learned after 1 million steps by Eik-HIQL and HIQL respectively. These plots are generated following the same methodology in Fig.~\ref{fig:intro_pi_hiql_value_functions}. }
+    \label{fig:limitations_value_functions}
+    \vspace{-10pt}
+\end{wrapfigure}
+
+\vspace{-0.0cm}
+\paragraph{Limitations} We conclude by discussing some limitations of our approach, particularly in contact-rich tasks that involve interactions with external objects. In the \texttt{antsoccer} domain, for instance, an ant agent must not only navigate but also interact with a soccer ball to reach a specified goal. Similarly, in manipulation tasks such as \texttt{cube-single-play}, the agent must coordinate precise contact interactions with objects in the scene. These tasks introduce hybrid, non-Lipschitz dynamics due to discontinuities in contact states, often modeled as categorical variables (e.g., in-contact vs. free motion), which pose a challenge for regularizers grounded in smoothness and Lipschitz continuity assumptions~\cite{kim2021hamilton}, such as our Eikonal term. As visualized in Fig.~\ref{fig:limitations_value_functions} for the \texttt{antsoccer} experiments, Eik-HIQL learns a GCVF that aligns well with the environment geometry, particularly for the navigational components. However, this structured value function does not consistently yield better performance (cf. Table~\ref{tab:full_offline_GCRL}) as these tasks also require complex interactions with objects in the environment. Similar trends are observed in manipulation tasks, where Eik-HIQL performs comparably to the baselines but does not show marked gains. These experiments are included for completeness and highlight that, while Eik-HIQL excels in navigation-dominated domains, additional mechanisms, such as task-adaptive speed profiles or representation learning tailored to contact dynamics, may be necessary to extend its benefits to interactive, contact-rich environments. We leave this direction for future work.
+
+\vspace{-0.0cm}
+\section{Conclusion}
+\vspace{-0.0cm}
+We introduced Eik-HIQL, a novel approach to Offline GCRL that integrates an Eikonal PDE-based regularizer for GCVF estimation. Our analysis demonstrated that the Eikonal regularizer effectively introduces a useful distance-like inductive bias, which promotes consistent gradient magnitudes and improves value estimation in high-dimensional spaces (cf. Fig.~\ref{fig:intro_pi_hiql_value_functions}). This property mitigates irregularities from the limited coverage of offline datasets, resulting in robust, globally consistent GCVFs that accurately capture the underlying structure of the environment. Consequently, Eik-HIQL outperformed SOTA baselines across diverse tasks, excelling in complex scenarios such as large-scale mazes and trajectory stitching, where traditional methods often fail to generalize.
+
+However, our experiments also highlighted limitations in interactive tasks. We discuss how our Eikonal regularizer induces excessive smoothness in the learned GCVFs which does hinder performance in interactive tasks where non-smoothness, or at least non-global smoothness, is required. These findings suggest that, while the Eikonal regularizer significantly enhances navigation tasks, future work should incorporate mechanisms that better capture task-specific dynamics, such as object interaction, to improve applicability across diverse domains.
+
+Overall, this work underscores the potential of Pi methods to address fundamental challenges in Offline GCRL. By enhancing scalability and generalization of value estimation, the Eikonal regularizer provides a foundation for leveraging domain knowledge in RL. Future research could expand on this foundation by exploring multi-agents settings and integrating task-specific biases for interactive environments.
+
+\bibliography{my_bib}
+\bibliographystyle{unsrtnat}
+
+\clearpage
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% APPENDIX
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+
+\begin{comment}
+\section*{NeurIPS Paper Checklist}
+
+\begin{enumerate}
+
+\item {\bf Claims}
+    \item[] Question: Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?
+    \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: 
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the abstract and introduction do not include the claims made in the paper.
+        \item The abstract and/or introduction should clearly state the claims made, including the contributions made in the paper and important assumptions and limitations. A No or NA answer to this question will not be perceived well by the reviewers. 
+        \item The claims made should match theoretical and experimental results, and reflect how much the results can be expected to generalize to other settings. 
+        \item It is fine to include aspirational goals as motivation as long as it is clear that these goals are not attained by the paper. 
+    \end{itemize}
+
+\item {\bf Limitations}
+    \item[] Question: Does the paper discuss the limitations of the work performed by the authors?
+    \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: we have a limitations paragraph.
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper has no limitation while the answer No means that the paper has limitations, but those are not discussed in the paper. 
+        \item The authors are encouraged to create a separate "Limitations" section in their paper.
+        \item The paper should point out any strong assumptions and how robust the results are to violations of these assumptions (e.g., independence assumptions, noiseless settings, model well-specification, asymptotic approximations only holding locally). The authors should reflect on how these assumptions might be violated in practice and what the implications would be.
+        \item The authors should reflect on the scope of the claims made, e.g., if the approach was only tested on a few datasets or with a few runs. In general, empirical results often depend on implicit assumptions, which should be articulated.
+        \item The authors should reflect on the factors that influence the performance of the approach. For example, a facial recognition algorithm may perform poorly when image resolution is low or images are taken in low lighting. Or a speech-to-text system might not be used reliably to provide closed captions for online lectures because it fails to handle technical jargon.
+        \item The authors should discuss the computational efficiency of the proposed algorithms and how they scale with dataset size.
+        \item If applicable, the authors should discuss possible limitations of their approach to address problems of privacy and fairness.
+        \item While the authors might fear that complete honesty about limitations might be used by reviewers as grounds for rejection, a worse outcome might be that reviewers discover limitations that aren't acknowledged in the paper. The authors should use their best judgment and recognize that individual actions in favor of transparency play an important role in developing norms that preserve the integrity of the community. Reviewers will be specifically instructed to not penalize honesty concerning limitations.
+    \end{itemize}
+
+\item {\bf Theory assumptions and proofs}
+    \item[] Question: For each theoretical result, does the paper provide the full set of assumptions and a complete (and correct) proof?
+    \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: the proof is included in the main text.
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper does not include theoretical results. 
+        \item All the theorems, formulas, and proofs in the paper should be numbered and cross-referenced.
+        \item All assumptions should be clearly stated or referenced in the statement of any theorems.
+        \item The proofs can either appear in the main paper or the supplemental material, but if they appear in the supplemental material, the authors are encouraged to provide a short proof sketch to provide intuition. 
+        \item Inversely, any informal proof provided in the core of the paper should be complemented by formal proofs provided in appendix or supplemental material.
+        \item Theorems and Lemmas that the proof relies upon should be properly referenced. 
+    \end{itemize}
+
+    \item {\bf Experimental result reproducibility}
+    \item[] Question: Does the paper fully disclose all the information needed to reproduce the main experimental results of the paper to the extent that it affects the main claims and/or conclusions of the paper (regardless of whether the code and data are provided or not)?
+    \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: All the details are reported between main text and the appendix. Furthermore, we have released the code.
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper does not include experiments.
+        \item If the paper includes experiments, a No answer to this question will not be perceived well by the reviewers: Making the paper reproducible is important, regardless of whether the code and data are provided or not.
+        \item If the contribution is a dataset and/or model, the authors should describe the steps taken to make their results reproducible or verifiable. 
+        \item Depending on the contribution, reproducibility can be accomplished in various ways. For example, if the contribution is a novel architecture, describing the architecture fully might suffice, or if the contribution is a specific model and empirical evaluation, it may be necessary to either make it possible for others to replicate the model with the same dataset, or provide access to the model. In general. releasing code and data is often one good way to accomplish this, but reproducibility can also be provided via detailed instructions for how to replicate the results, access to a hosted model (e.g., in the case of a large language model), releasing of a model checkpoint, or other means that are appropriate to the research performed.
+        \item While NeurIPS does not require releasing code, the conference does require all submissions to provide some reasonable avenue for reproducibility, which may depend on the nature of the contribution. For example
+        \begin{enumerate}
+            \item If the contribution is primarily a new algorithm, the paper should make it clear how to reproduce that algorithm.
+            \item If the contribution is primarily a new model architecture, the paper should describe the architecture clearly and fully.
+            \item If the contribution is a new model (e.g., a large language model), then there should either be a way to access this model for reproducing the results or a way to reproduce the model (e.g., with an open-source dataset or instructions for how to construct the dataset).
+            \item We recognize that reproducibility may be tricky in some cases, in which case authors are welcome to describe the particular way they provide for reproducibility. In the case of closed-source models, it may be that access to the model is limited in some way (e.g., to registered users), but it should be possible for other researchers to have some path to reproducing or verifying the results.
+        \end{enumerate}
+    \end{itemize}
+
+
+\item {\bf Open access to data and code}
+    \item[] Question: Does the paper provide open access to the data and code, with sufficient instructions to faithfully reproduce the main experimental results, as described in supplemental material?
+    \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: Code has been released.
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that paper does not include experiments requiring code.
+        \item Please see the NeurIPS code and data submission guidelines (\url{https://nips.cc/public/guides/CodeSubmissionPolicy}) for more details.
+        \item While we encourage the release of code and data, we understand that this might not be possible, so “No” is an acceptable answer. Papers cannot be rejected simply for not including code, unless this is central to the contribution (e.g., for a new open-source benchmark).
+        \item The instructions should contain the exact command and environment needed to run to reproduce the results. See the NeurIPS code and data submission guidelines (\url{https://nips.cc/public/guides/CodeSubmissionPolicy}) for more details.
+        \item The authors should provide instructions on data access and preparation, including how to access the raw data, preprocessed data, intermediate data, and generated data, etc.
+        \item The authors should provide scripts to reproduce all experimental results for the new proposed method and baselines. If only a subset of experiments are reproducible, they should state which ones are omitted from the script and why.
+        \item At submission time, to preserve anonymity, the authors should release anonymized versions (if applicable).
+        \item Providing as much information as possible in supplemental material (appended to the paper) is recommended, but including URLs to data and code is permitted.
+    \end{itemize}
+
+
+\item {\bf Experimental setting/details}
+    \item[] Question: Does the paper specify all the training and test details (e.g., data splits, hyperparameters, how they were chosen, type of optimizer, etc.) necessary to understand the results?
+    \item[] \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: The most important details are available in the main text and the rest is reported in the Appendix.
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper does not include experiments.
+        \item The experimental setting should be presented in the core of the paper to a level of detail that is necessary to appreciate the results and make sense of them.
+        \item The full details can be provided either with the code, in appendix, or as supplemental material.
+    \end{itemize}
+
+\item {\bf Experiment statistical significance}
+    \item[] Question: Does the paper report error bars suitably and correctly defined or other appropriate information about the statistical significance of the experiments?
+    \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: yes, we report the standard deviation.
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper does not include experiments.
+        \item The authors should answer "Yes" if the results are accompanied by error bars, confidence intervals, or statistical significance tests, at least for the experiments that support the main claims of the paper.
+        \item The factors of variability that the error bars are capturing should be clearly stated (for example, train/test split, initialization, random drawing of some parameter, or overall run with given experimental conditions).
+        \item The method for calculating the error bars should be explained (closed form formula, call to a library function, bootstrap, etc.)
+        \item The assumptions made should be given (e.g., Normally distributed errors).
+        \item It should be clear whether the error bar is the standard deviation or the standard error of the mean.
+        \item It is OK to report 1-sigma error bars, but one should state it. The authors should preferably report a 2-sigma error bar than state that they have a 96\% CI, if the hypothesis of Normality of errors is not verified.
+        \item For asymmetric distributions, the authors should be careful not to show in tables or figures symmetric error bars that would yield results that are out of range (e.g. negative error rates).
+        \item If error bars are reported in tables or plots, The authors should explain in the text how they were calculated and reference the corresponding figures or tables in the text.
+    \end{itemize}
+
+\item {\bf Experiments compute resources}
+    \item[] Question: For each experiment, does the paper provide sufficient information on the computer resources (type of compute workers, memory, time of execution) needed to reproduce the experiments?
+    \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: Appendix.
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper does not include experiments.
+        \item The paper should indicate the type of compute workers CPU or GPU, internal cluster, or cloud provider, including relevant memory and storage.
+        \item The paper should provide the amount of compute required for each of the individual experimental runs as well as estimate the total compute. 
+        \item The paper should disclose whether the full research project required more compute than the experiments reported in the paper (e.g., preliminary or failed experiments that didn't make it into the paper). 
+    \end{itemize}
+    
+\item {\bf Code of ethics}
+    \item[] Question: Does the research conducted in the paper conform, in every respect, with the NeurIPS Code of Ethics \url{https://neurips.cc/public/EthicsGuidelines}?
+    \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification:
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the authors have not reviewed the NeurIPS Code of Ethics.
+        \item If the authors answer No, they should explain the special circumstances that require a deviation from the Code of Ethics.
+        \item The authors should make sure to preserve anonymity (e.g., if there is a special consideration due to laws or regulations in their jurisdiction).
+    \end{itemize}
+
+
+\item {\bf Broader impacts}
+    \item[] Question: Does the paper discuss both potential positive societal impacts and negative societal impacts of the work performed?
+    \item[] Answer: \answerYes{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: 
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that there is no societal impact of the work performed.
+        \item If the authors answer NA or No, they should explain why their work has no societal impact or why the paper does not address societal impact.
+        \item Examples of negative societal impacts include potential malicious or unintended uses (e.g., disinformation, generating fake profiles, surveillance), fairness considerations (e.g., deployment of technologies that could make decisions that unfairly impact specific groups), privacy considerations, and security considerations.
+        \item The conference expects that many papers will be foundational research and not tied to particular applications, let alone deployments. However, if there is a direct path to any negative applications, the authors should point it out. For example, it is legitimate to point out that an improvement in the quality of generative models could be used to generate deepfakes for disinformation. On the other hand, it is not needed to point out that a generic algorithm for optimizing neural networks could enable people to train models that generate Deepfakes faster.
+        \item The authors should consider possible harms that could arise when the technology is being used as intended and functioning correctly, harms that could arise when the technology is being used as intended but gives incorrect results, and harms following from (intentional or unintentional) misuse of the technology.
+        \item If there are negative societal impacts, the authors could also discuss possible mitigation strategies (e.g., gated release of models, providing defenses in addition to attacks, mechanisms for monitoring misuse, mechanisms to monitor how a system learns from feedback over time, improving the efficiency and accessibility of ML).
+    \end{itemize}
+    
+\item {\bf Safeguards}
+    \item[] Question: Does the paper describe safeguards that have been put in place for responsible release of data or models that have a high risk for misuse (e.g., pretrained language models, image generators, or scraped datasets)?
+    \item[] Answer: \answerNA{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: 
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper poses no such risks.
+        \item Released models that have a high risk for misuse or dual-use should be released with necessary safeguards to allow for controlled use of the model, for example by requiring that users adhere to usage guidelines or restrictions to access the model or implementing safety filters. 
+        \item Datasets that have been scraped from the Internet could pose safety risks. The authors should describe how they avoided releasing unsafe images.
+        \item We recognize that providing effective safeguards is challenging, and many papers do not require this, but we encourage authors to take this into account and make a best faith effort.
+    \end{itemize}
+
+\item {\bf Licenses for existing assets}
+    \item[] Question: Are the creators or original owners of assets (e.g., code, data, models), used in the paper, properly credited and are the license and terms of use explicitly mentioned and properly respected?
+    \item[] Answer: \answerNA{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification:
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper does not use existing assets.
+        \item The authors should cite the original paper that produced the code package or dataset.
+        \item The authors should state which version of the asset is used and, if possible, include a URL.
+        \item The name of the license (e.g., CC-BY 4.0) should be included for each asset.
+        \item For scraped data from a particular source (e.g., website), the copyright and terms of service of that source should be provided.
+        \item If assets are released, the license, copyright information, and terms of use in the package should be provided. For popular datasets, \url{paperswithcode.com/datasets} has curated licenses for some datasets. Their licensing guide can help determine the license of a dataset.
+        \item For existing datasets that are re-packaged, both the original license and the license of the derived asset (if it has changed) should be provided.
+        \item If this information is not available online, the authors are encouraged to reach out to the asset's creators.
+    \end{itemize}
+
+\item {\bf New assets}
+    \item[] Question: Are new assets introduced in the paper well documented and is the documentation provided alongside the assets?
+    \item[] Answer: \answerNA{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: 
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper does not release new assets.
+        \item Researchers should communicate the details of the dataset/code/model as part of their submissions via structured templates. This includes details about training, license, limitations, etc. 
+        \item The paper should discuss whether and how consent was obtained from people whose asset is used.
+        \item At submission time, remember to anonymize your assets (if applicable). You can either create an anonymized URL or include an anonymized zip file.
+    \end{itemize}
+
+\item {\bf Crowdsourcing and research with human subjects}
+    \item[] Question: For crowdsourcing experiments and research with human subjects, does the paper include the full text of instructions given to participants and screenshots, if applicable, as well as details about compensation (if any)? 
+    \item[] Answer: \answerNA{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: 
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper does not involve crowdsourcing nor research with human subjects.
+        \item Including this information in the supplemental material is fine, but if the main contribution of the paper involves human subjects, then as much detail as possible should be included in the main paper. 
+        \item According to the NeurIPS Code of Ethics, workers involved in data collection, curation, or other labor should be paid at least the minimum wage in the country of the data collector. 
+    \end{itemize}
+
+\item {\bf Institutional review board (IRB) approvals or equivalent for research with human subjects}
+    \item[] Question: Does the paper describe potential risks incurred by study participants, whether such risks were disclosed to the subjects, and whether Institutional Review Board (IRB) approvals (or an equivalent approval/review based on the requirements of your country or institution) were obtained?
+    \item[] Answer: \answerNA{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: 
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the paper does not involve crowdsourcing nor research with human subjects.
+        \item Depending on the country in which research is conducted, IRB approval (or equivalent) may be required for any human subjects research. If you obtained IRB approval, you should clearly state this in the paper. 
+        \item We recognize that the procedures for this may vary significantly between institutions and locations, and we expect authors to adhere to the NeurIPS Code of Ethics and the guidelines for their institution. 
+        \item For initial submissions, do not include any information that would break anonymity (if applicable), such as the institution conducting the review.
+    \end{itemize}
+
+\item {\bf Declaration of LLM usage}
+    \item[] Question: Does the paper describe the usage of LLMs if it is an important, original, or non-standard component of the core methods in this research? Note that if the LLM is used only for writing, editing, or formatting purposes and does not impact the core methodology, scientific rigorousness, or originality of the research, declaration is not required.
+    %this research? 
+    \item[] Answer: \answerNA{} % Replace by \answerYes{}, \answerNo{}, or \answerNA{}.
+    \item[] Justification: 
+    \item[] Guidelines:
+    \begin{itemize}
+        \item The answer NA means that the core method development in this research does not involve LLMs as any important, original, or non-standard components.
+        \item Please refer to our LLM policy (\url{https://neurips.cc/Conferences/2025/LLM}) for what should or should not be described.
+    \end{itemize}
+\end{enumerate}
+\end{comment}
+
+\newpage
+\appendix
+
+\section{Impact Statement}
+This paper aims to advance the field of machine learning for autonomous decision-making and control in robotic systems. We achieved this goal through the development of physics-informed methods for offline goal-conditioned reinforcement learning. While our work has potential societal implications, we do not identify any that require specific emphasis here.
+
+\section{Speed profiles and HJB comparison: additional details and contour plots}
+\label{app_sec:speed_ablation}
+In this section, we provide additional details related to the \emph{Speed Profiles and HJB Regularizer Comparison} paragraph in Section~\ref{sec:experiments}. Specifically, we illustrate how the distance function \( d(s) \), used to define the speed profiles in~\eqref{eq:exp_speed} and~\eqref{eq:linear_speed}, is computed in Fig.~\ref{fig:data_and_speed_computation_examples}.
+
+Additionally, Fig.~\ref{fig_app:speed_ablation_value_functions} presents contour plots of the GCVFs learned by the algorithms evaluated in Table~\ref{tab:speed_ablation}. These visualizations provide qualitative support for the quantitative results in Table~\ref{tab:speed_ablation}, showing that higher returns tend to correlate with smoother, artifact-free value functions that more closely follow the structure of the underlying maze.
+
+\begin{figure}[ht!]
+    \centering
+    \begin{subfigure}[t]{0.45\linewidth}
+        \centering
+        \includegraphics[width=0.7\linewidth, height=3.5cm]{Figures/Distance_obstacles.jpg}
+        \caption{$d(s)$.}
+        \label{fig:distance_obstacles}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.45\linewidth}
+        \centering
+        \includegraphics[width=0.8\linewidth, height=3.5cm]{Figures/Linear_speed_profile.jpg}
+        \caption{$S_{\text{lin}}(s)$ in \eqref{eq:linear_speed}.}
+        \label{fig:linear_speed_profile}
+    \end{subfigure}
+    \caption{Fig.~\ref{fig:distance_obstacles} illustrates the computation of the distance function \(d(s)\) used in \eqref{eq:exp_speed} and \eqref{eq:linear_speed}. Let the state be represented by its spatial coordinates \(s = (x,y) \in \mathbb{R}^2\), and let \(\mathcal{O} = \{o_1, \ldots, o_M\}\) denote the set of obstacle coordinates in the maze. We define \(d(s) = \min_{o \in \mathcal{O}} \| s - o \|_2\), i.e., the Euclidean distance from \(s\) to the nearest obstacle. Fig.~\ref{fig:linear_speed_profile} reports the resulting speed profile obtained using \(S_{\text{lin}}(s)\) in \eqref{eq:linear_speed} for the \texttt{pointmaze-medium-navigate-v0} dataset.}
+    \label{fig:data_and_speed_computation_examples}
+\end{figure}
+
+\begin{figure*}[ht!]
+    \centering
+    \includegraphics[width=\linewidth]{Figures/value_function_task_1_step_100000_pointmaze.jpg}
+    \put(-380,-15){(a) Eik-HIQL}
+    \put(-300,-15){(b) Eik-HIQL~Exp~\eqref{eq:exp_speed}}
+    \put(-200,-15){(c) Eik-HIQL~Lin~\eqref{eq:linear_speed}}
+    \put(-95,-15){(d) HJB-HIQL~\eqref{eq:HJB_regularizer}}
+    %\begin{comment}
+    % \begin{subfigure}[t]{0.24\linewidth}
+    %     \centering
+    %     \includegraphics[width=\linewidth]{Figures/value_function_task_1_step_100000_pointmaze_pi_hiql_const.pdf}
+    %     \caption{Eik-HIQL.}
+    %     \label{fig:value_function_pi_hiql_const_pointmaze}
+    % \end{subfigure}
+    % \begin{subfigure}[t]{0.24\linewidth}
+    %     \centering
+    %     \includegraphics[width=\linewidth]{Figures/value_function_task_1_step_100000_pointmaze_pi_hiql_exp.pdf}
+    %     \caption{Eik-HIQL Exp~\eqref{eq:exp_speed}.}
+    %     \label{fig:value_function_pi_hiql_exp_pointmaze}
+    % \end{subfigure}
+    % \begin{subfigure}[t]{0.24\linewidth}
+    %     \centering
+    %     \includegraphics[width=\linewidth]{Figures/value_function_task_1_step_100000_pointmaze_pi_hiql_lin.pdf}
+    %     \caption{Eik-HIQL Lin~\eqref{eq:linear_speed}.}
+    %     \label{fig:value_function_pi_hiql_lin_pointmaze}
+    % \end{subfigure}
+    % \begin{subfigure}[t]{0.24\linewidth}
+    %     \centering
+    %     \includegraphics[width=\linewidth]{Figures/value_function_task_1_step_100000_pointmaze_HJB.pdf}
+    %     \caption{Eik-HIQL HJB~\eqref{eq:HJB_regularizer}.}
+    %     \label{fig:value_function_pi_hiql_HJB_pointmaze}
+    % \end{subfigure}
+    %\end{comment}
+    \caption{Contour plots of the GCVF on \texttt{pointmaze-giant-stitch-v0}~\cite{park2024ogbench}, learned after 100,000 training steps by the algorithms in Table~\ref{tab:speed_ablation}. We observe that Eik-HIQL with constant speed profile \(S(s)=1\) provides the most accurate GCVF estimation, resulting in the highest score for this task. In contrast, the contour plot for HJB-HIQL in (d) fails to effectively capture the maze layout. Furthermore, in (b) and (c) we annotate, with red circles, examples of artifacts arising in Eik-HIQL~Exp and Eik-HIQL~Lin, respectively.}
+    \label{fig_app:speed_ablation_value_functions}
+\end{figure*}
+
+\section{HJB PDE step-by-step derivations and Proof of Proposition~\ref{prop:HJB_Eik}}
+\label{sec_app:step_by_step}
+
+In the following we provide the step-by-step derivations for the HJB PDE in \eqref{eq:HJB} and the full proof for Proposition~\ref{prop:HJB_Eik}.
+
+\subsection{HJB PDE derivations}
+
+The optimal value function $V(s,g)$ associated with the undiscounted optimal control problem in \eqref{eq:J_cont}, satisfies the following principle of optimality
+\begin{equation}
+V(s, g) = \inf_{a \in \mathcal{A}}[c(s, a)\Delta t + V(s(t+\Delta t), g)], 
+\label{eq_app:principle_of_optimality}
+\end{equation}
+where $\Delta t$ is a small time step. By substituting the Taylor expansion 
+$$V(s(t + \Delta t), g) = V(s,g) + \nabla_s V(s,g)^{\top}f(s,a)\Delta t + O(\Delta t^2)$$
+into \eqref{eq_app:principle_of_optimality}, we obtain
+$$V(s, g) = \inf_{a \in \mathcal{A}}[c(s, a)\Delta t + V(s,g) + \nabla_s V(s,g)^{\top}f(s,a)\Delta t + O(\Delta t^2)].$$
+Subtracting $V(s,g)$ on both sides and dividing by $\Delta t$ gives:
+$$0 = \inf_{a \in \mathcal{A}}[c(s, a) + \nabla_s V(s,g)^{\top}f(s,a) + O(\Delta t)].$$
+Taking the limit $\Delta t \to 0$, we recover Eq.~\eqref{eq:HJB}:
+$$\inf_{a \in \mathcal{A}}[c(s, a) + \nabla_s V(s,g)^{\top}f(s,a)] = 0.$$
+
+\subsection{Proof of Proposition~\ref{prop:HJB_Eik}}
+
+\begin{proof}
+Consider the HJB PDE in \eqref{eq:HJB}. By applying the Cauchy-Schwarz inequality to the argument of the minimization we obtain
+$$c(s, a) + \nabla_s V(s,g)^{\top}f(s,a) \leq c(s,a) + \|\nabla_sV(s,g)\|\|f(s,a)\|.$$
+Then, by defining
+$$F^*(s) = \sup_{a \in \mathcal{A}}\|f(s,a)\|,$$
+we can further upper bound the right-hand-side and obtain:
+$$c(s, a) + \nabla_s V(s,g)^{\top}f(s,a) \leq c(s,a) + \|\nabla_sV(s,g)\|F^*(s).$$
+Finally, applying the infimum over $a \in \mathcal{A}$ on both sides yields:
+$$\inf_{a \in \mathcal{A}} [c(s, a) + \nabla_s V(s,g)^{\top}f(s,a)] \leq \inf_{a \in \mathcal{A}}[c(s,a) + \|\nabla_sV(s,g)\|F^*(s)],$$
+where the result in Eq.~\eqref{eq:prop_ineq} is obtained by defining $c^*(s) = \inf_{a \in \mathcal{A}}c(s,a)$.
+
+For the equality in \eqref{eq:prop_eq}, note that for the isotropic dynamics $f(s,a)=a$ and given $c(s,a)$ constant over $||a||=1$, the inner product $\nabla_s V(s, g)^{\intercal}f(s,a)$ attains its minimal value when $a$ points in the direction opposite to $\nabla_s V(s, g)$. Specifically, this occurs when 
+$$a^* = \arg\inf_{||a||=1} \nabla_s V(s, g)^{\intercal}a = -\frac{\nabla_s V(s, g)}{||\nabla_s V(s, g)||}.$$ 
+Substituting $f(s,a) = a^*$ into 
+$$H(s,g,\nabla_s V(s,g)) = \inf_{a \in \mathcal{A}}[c(s, a) + \nabla_s V(s,g)^{\top}f(s,a)]$$
+and simplifying yields 
+$$H(s,g,\nabla_s V(s,g)) = c^*(s) - ||\nabla_s V(s, g)||.$$
+\end{proof}
+
+\section{Psuedocode and Hyperparameters}
+\label{sec:app_psuedocode_hyperparam}
+
+During training, Eik-HIQL performs an Eikonal-regularized value estimation step followed by a hierarchical policy extraction step. During the value estimation step, the following loss, as provided in \eqref{eq:Eik_reg_expectile_regre_V_learning}-\eqref{eq:Eik_reg}, is minimized: 
+\begin{align}
+\begin{split}
+    \mathcal{L}_V(\bm{\theta}_V) = \mathbb{E}_{(s_t,s_{t+1}) \sim \mathcal{D}, g \sim \mathcal{P}_g}\Big[&L_2^{\iota}\big(\mathcal{R}(s_t,g) + \gamma V_{\bar{\bm{\theta}}_V} (s_{t+1}, g) - V_{\bm{\theta}_V}(s_t, g)\big) \\
+    &+ \big(||\nabla_s V_{\bm{\theta}_V}(s_t, g)|| \cdot S(s_t) - 1\big)^2\Big].
+\end{split}
+\label{eq_app:PI_GCVF_loss}
+\end{align}
+
+The hierarchical policy extraction step follows \citet{park2024hiql} and leverages, for both $\pi^{hi}_{\bm{\theta}_{hi}}$ and $\pi^{lo}_{\bm{\theta}_{lo}}$, an advantage-weighted regression-style objective:
+\begin{align}
+    J_{\pi^{hi}}(\bm{\theta}_{hi}) &= \mathbb{E}_{(s_t,s_{t+k}) \sim \mathcal{D}, g \sim \mathcal{P}_g}\Big[\exp(\beta \cdot \tilde A^{hi}\left(s_t, s_{t+k}, g)\right)\log \pi^{hi}_{\bm{\theta}_{hi}}(s_{t+k}|s_t, g) \Big], \label{eq_app:pi_hi_loss}\\
+    J_{\pi^{lo}}(\bm{\theta}_{lo}) &= \mathbb{E}_{(s_t, a_t, s_{t+1}, s_{t+k}) \sim \mathcal{D}}\Big[\exp(\beta \cdot \tilde A^{lo}(s_t, a_t, s_{t+k}))\log \pi_{\bm{\theta}_{lo}}^{lo}(a_t|s_t, s_{t+k}) \Big], \label{eq_app:pi_lo_loss}
+\end{align}
+where $\beta$ is an inverse temperature hyperparameter and $\tilde A^{hi}\left(s_t, s_{t+k}, g\right)$ and $\tilde A^{lo}(s_t, a_t, s_{t+k})$ are respectively approximated as $V_{\bm{\theta}_V}(s_{t+k}, g) - V_{\bm{\theta}_V}(s_{t}, g)$ and $V_{\bm{\theta}_V}(s_{t+1}, s_{t+k}) - V_{\bm{\theta}_V}(s_{t}, s_{t+k})$.
+The full pseudocode for Eik-HIQL is provided in Algorithm~\ref{alg:Eik-HIQL}. Furthermore, a function written in JAX on how to compute the gradient $\nabla_s V_{\bm{\theta}_V}$ in \eqref{eq_app:PI_GCVF_loss} is summarized in Algorithm~\ref{alg:grad_V}. Finally, Table~\ref{tab:Hyper} reports the hyperparameter values most commonly used in our experiments. For more implementation details, refer to our \href{https://github.com/VittorioGiammarino/Eik-HIQL}{GitHub repository}\footnote{https://github.com/VittorioGiammarino/Eik-HIQL}.
+
+\begin{algorithm}
+   \caption{Eikonal-regularized Hierarchical Implicit Q-Learning (Eik-HIQL)}
+   \label{alg:Eik-HIQL}
+\begin{algorithmic}
+   \STATE {\bfseries Input:} Offline dataset $\mathcal{D}$, value function $V_{\bm{\theta}_V}$, target value function $V_{\bar{\bm{\theta}}_V}$, high-level policy $\pi^{hi}_{\bm{\theta}_{hi}}$, low-level policy $\pi^{lo}_{\bm{\theta}_{lo}}$, speed profile $S$, expectile factor $\iota$, discount factor $\gamma$, inverse temperature parameter $\beta$, learning rates $\alpha_V$, $\alpha_{hi}$, $\alpha_{lo}$, target update rate $\tau$
+   \WHILE{not converged}
+   \STATE $(s_t, s_{t+1}, g) \sim \mathcal{D}$ 
+   \STATE Update $V_{\bm{\theta}_V}$ minimizing $\mathcal{L}_V(\bm{\theta}_V)$ in \eqref{eq_app:PI_GCVF_loss} with learning rate $\alpha_V$
+   \STATE $\bar{\bm{\theta}}_V \gets (1-\tau)\bar{\bm{\theta}}_V + \tau \bm{\theta}_V$
+   \ENDWHILE
+   \WHILE{not converged}
+   \STATE $(s_t, s_{t+k}, g) \sim \mathcal{D}$ 
+   \STATE Update $\pi^{hi}_{\bm{\theta}_{hi}}$ maximizing $J_{\pi^{hi}}(\bm{\theta}_{hi})$ in \eqref{eq_app:pi_hi_loss} with learning rate $\alpha_{hi}$
+   \ENDWHILE
+   \WHILE{not converged}
+   \STATE $(s_t, a_t, s_{t+1}, s_{t+k}) \sim \mathcal{D}$ 
+   \STATE Update $\pi^{lo}_{\bm{\theta}_{lo}}$ maximizing $J_{\pi^{lo}}(\bm{\theta}_{lo})$ in \eqref{eq_app:pi_lo_loss} with learning rate $\alpha_{lo}$
+   \ENDWHILE
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{Compute $\nabla_s V_{\bm{\theta}_V}$}
+\label{alg:grad_V}
+\begin{algorithmic}
+\STATE {\bfseries Input:} states $s$, goals $g$, network parameters $\bm{\theta}_V$  
+    \STATE \textbf{Define} \textsc{forward}$(s, g, \bm{\theta}_V)$: \\
+    \STATE \quad \textbf{return} $\textsc{network.select}(V_{\bm{\theta}_V})(s, g, \text{params}=\bm{\theta}_V)$ \\
+    
+    \STATE $ \text{grad\_s} \gets 
+    \textsc{jax.vmap}(\textsc{jax.grad}(\textsc{forward}, \text{argnums}=0), \text{in\_axes}=(0, 0, \textbf{None}))(s, g, \bm{\theta}_V)$ \\
+    \STATE \textbf{return} $\text{grad\_s}$ \\
+\end{algorithmic}
+\end{algorithm}
+
+\begin{table}[H]
+\centering
+\caption{Hyperparameter values for Eik-HIQL.}
+\label{tab:Hyper}
+\begin{tabular}{c c c c}\toprule
+\multicolumn{2}{l}{Hyperparameter Name} & \multicolumn{2}{c}{Value}\\
+\cmidrule(lr){1-2} \cmidrule(lr){3-4}
+\multicolumn{2}{l}{Decay rate  $(\lambda)$} & \multicolumn{2}{c}{$1.0$} \\
+\multicolumn{2}{l}{Minimum speed $(S_{\text{min}})$} & \multicolumn{2}{c}{$0.1$} \\
+\multicolumn{2}{l}{Discount factor $(\gamma)$} & \multicolumn{2}{c}{$0.99$} \\
+\multicolumn{2}{l}{Batch size $(B)$} & \multicolumn{2}{c}{$1024$} \\
+\multicolumn{2}{l}{Optimizer} & \multicolumn{2}{c}{Adam}\\
+\multicolumn{2}{l}{Learning rates $\alpha_V$, $\alpha_{hi}$, $\alpha_{lo}$} & \multicolumn{2}{c}{$3\cdot10^{-4}$}\\
+\multicolumn{2}{l}{Target update rate $(\tau)$} & \multicolumn{2}{c}{$0.005$}\\
+\multicolumn{2}{l}{Expectile factor $(\iota)$} & \multicolumn{2}{c}{$0.7$}\\
+\multicolumn{2}{l}{Inverse temperature parameter $(\beta)$} & \multicolumn{2}{c}{$3.0$}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\section{Learning Curves}
+\label{sec:app_learning_curves}
+Fig.~\ref{fig_app:speed_ablation} shows the complete learning curves, plotted as a function of training steps, for the experiments reported in Table~\ref{tab:speed_ablation}. Figs.~\ref{fig_app:pointmaze_Eik-HIQL}, \ref{fig_app:antmaze_Eik-HIQL}, \ref{fig_app:humanoidmaze_Eik-HIQL}, \ref{fig_app:antsoccer}, and~\ref{fig_app:manipulation} display the learning curves for the \texttt{pointmaze}, \texttt{antmaze}, \texttt{humanoidmaze}, \texttt{antsoccer}, and \texttt{manipulation} experiments in Table~\ref{tab:full_offline_GCRL}, respectively.
+
+All experiments were conducted on a single NVIDIA RTX 3090 GPU (24 GB VRAM), using a local server equipped with a 12th Gen Intel i7-12700F CPU, 32 GB RAM. No cloud services or compute clusters were used. Each individual experimental run required approximately 4 hours of compute time on the GPU.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.95\linewidth]{Figures/Summary_GC_PI_HIQL_speed_ablation.pdf}
+    \caption{Learning curves for the speed profile ablation and the comparison with an HJB regularizer in Table~\ref{tab:speed_ablation}. Plots show the average success percentage per evaluation across seeds as a function of training steps.}
+    \label{fig_app:speed_ablation}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.95\linewidth]{Figures/Summary_pointmaze_100k_HIQL.pdf}
+    \caption{Learning curves for the \texttt{pointmaze} experiments in Table~\ref{tab:full_offline_GCRL}. Plots show the average success percentage per evaluation across seeds as a function of training steps.}
+    \label{fig_app:pointmaze_Eik-HIQL}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.95\linewidth]{Figures/Summary_antmaze_PI_HIQL.pdf}
+    \caption{Learning curves for the \texttt{antmaze} experiments in Table~\ref{tab:full_offline_GCRL}. Plots show the average success percentage per evaluation across seeds as a function of training steps.}
+    \label{fig_app:antmaze_Eik-HIQL}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{Figures/Summary_humanoidmaze_PI_HIQL.pdf}
+    \caption{Learning curves for the \texttt{humanoidmaze} experiments in Table~\ref{tab:full_offline_GCRL}. Plots show the average success percentage per evaluation across seeds as a function of training steps.}
+    \label{fig_app:humanoidmaze_Eik-HIQL}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{Figures/Summary_antsoccer_PI_HIQL.pdf}
+    \caption{Learning curves for the \texttt{antsoccer} experiments in Table~\ref{tab:full_offline_GCRL}. Plots show the average success percentage per evaluation across seeds as a function of training steps.}
+    \label{fig_app:antsoccer}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.7\linewidth]{Figures/Summary_manipulation_PI_HIQL.pdf}
+    \caption{Learning curves for the \texttt{manipulation} experiments in Table~\ref{tab:full_offline_GCRL}. Plots show the average success percentage per evaluation across seeds as a function of training steps.}
+    \label{fig_app:manipulation}
+\end{figure}
+
+\vspace{-0.3cm}
+\section{Additional Experiments}
+\label{sec_app:additional_experiments}
+\vspace{-0.2cm}
+
+In the following, we present additional experiments demonstrating that our Eikonal regularizer can be seamlessly integrated with a broad range of temporal-difference (TD)-based GCRL algorithms. In particular, we apply it to Goal-Conditioned variants of IQL~\cite{kostrikov2021offline} and IVL~\cite{xu2022policy, ghosh2023reinforcement}, yielding Eik-GCIQL and Eik-GCIVL, respectively. The corresponding results are summarized in Table~\ref{tab_app:TD_ablation}, with learning curves provided in Fig.~\ref{fig_app:pointmaze_TD} and \ref{fig_app:antmaze_TD}. These experiments confirm the same conclusions drawn in the main paper from the comparison between Eik-HIQL and HIQL (Table~\ref{tab:full_offline_GCRL}), and further support our claim that the Eikonal regularizer can be successfully combined with diverse TD-based algorithms.
+
+\begin{table}
+\centering
+\scriptsize
+\caption{Summary of the experiments with different TD-based GCRL algorithms. All agents are trained for \textbf{100,000 training steps} using 10 seeds. We report the mean and standard deviation across seeds for the best evaluation achieved during training. For each seed, evaluations are conducted over $5$ different random goals, as designed in \citet{park2024ogbench}, with the learned policy tested for $50$ episodes per goal. Results within $95\%$ of the best value are written in \textbf{bold}.}
+\label{tab_app:TD_ablation}
+    \begin{tabular}{l l l c c c c}
+        \toprule
+        \textbf{Environment} & \textbf{Dataset Type} & \textbf{Maze Dimension} & \textbf{GCIQL} & \textbf{Eik-GCIQL} & \textbf{GCIVL} & \textbf{Eik-GCIVL} \\
+        \cmidrule(lr){1-7}
+        \multirow{8}{*}{\texttt{pointmaze}} & \multirow{4}{*}{\texttt{navigate}} & \texttt{medium} & $60\pm 1$ & $59 \pm 9$  & $63 \pm 6$  & \bm{$90 \pm 5$} \\
+        & & \texttt{large} & $39 \pm 1$ & $60 \pm 9$ & $38 \pm 5$  & \bm{$82 \pm 39$} \\
+        & & \texttt{giant} & $0 \pm 0$ & $2 \pm 4$ & $0 \pm 0$ & \bm{$86 \pm 11$} \\
+        & & \texttt{teleport} & $29 \pm 5$ & $25 \pm 12$ & $38 \pm 5$ & \bm{$49 \pm 4$} \\
+        \cmidrule(lr){2-7}
+        & \multirow{4}{*}{\texttt{stitch}} & \texttt{medium} & $41 \pm 11$ & $56 \pm 6$ & $57 \pm 9$ & \bm{$95 \pm 4$} \\
+        & & \texttt{large} & $25 \pm 8$ & $22 \pm 3$ & $11 \pm 8$ & \bm{$67 \pm 9$} \\
+        & & \texttt{giant} & $0 \pm 0$ & $0 \pm 0$ & $0 \pm 0$  & \bm{$23 \pm 10$} \\
+        & & \texttt{teleport} & $28 \pm 5$ & $25 \pm 3$ & \bm{$41 \pm 5$} & \bm{$38 \pm 3$} \\
+        \cmidrule(lr){1-7}
+        \multirow{8}{*}{\texttt{antmaze}} & \multirow{4}{*}{\texttt{navigate}} & \texttt{medium} & $27 \pm 4$ & $25 \pm 6$ & $36 \pm 5$ & \bm{$50 \pm 5$} \\
+        & & \texttt{large} & $9 \pm 3$ & $7 \pm 2$ & \bm{$16 \pm 4$} & \bm{$15 \pm 3$} \\
+        & & \texttt{giant} & $0 \pm 0$ & $0 \pm 0$ & $0 \pm 0$ & $0 \pm 0$ \\
+        & & \texttt{teleport} & $24 \pm 3$ & $23 \pm 2$ & \bm{$32 \pm 5$} & \bm{$30 \pm 3$} \\
+        \cmidrule(lr){2-7}
+        & \multirow{4}{*}{\texttt{stitch}} & \texttt{medium} & $19 \pm 4$ & $21 \pm 5$ & \bm{$25 \pm 4$} & \bm{$27 \pm 6$} \\
+        & & \texttt{large} & $6 \pm 3$ & $3 \pm 3$ & \bm{$12 \pm 3$} & $7 \pm 2$ \\
+        & & \texttt{giant} & $0 \pm 0$ & $0 \pm 0$ & $0 \pm 0$ & $0 \pm 0$ \\
+        & & \texttt{teleport} & $18 \pm 5$ & $23 \pm 3$ & \bm{$30 \pm 3$} & \bm{$28 \pm 3$} \\
+        \bottomrule
+    \end{tabular}
+    %\vspace{-12pt}
+\end{table}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.95\linewidth]{Figures/Summary_pointmaze_TD_ablation_main.pdf}
+    \caption{Learning curves for the \texttt{pointmaze} experiments in Table~\ref{tab_app:TD_ablation}. Plots show the average success percentage per evaluation across seeds as a function of training steps.}
+    \label{fig_app:pointmaze_TD}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.95\linewidth]{Figures/Summary_antmaze_TD_ablation_main.pdf}
+    \caption{Learning curves for the \texttt{antmaze} experiments in Table~\ref{tab:full_offline_GCRL}. Plots show the average success percentage per evaluation across seeds as a function of training steps.}
+    \label{fig_app:antmaze_TD}
+\end{figure}
+
+
+\end{document}

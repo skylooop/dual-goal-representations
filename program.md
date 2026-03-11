@@ -3,11 +3,11 @@
 This file defines how an autonomous agent should run research in this repository.
 
 Goal: improve evaluation success rate across tasks in the given RL environment (experiment with antmaze-large-navigate-v0)
-Right now we are experimenting with just GCIVL : `agents/gcivl/original.py`
+Right now we are experimenting with just GCIVL : `agents/gcivl/original.py`. Check the file `eikonal.tex` for an example of good research idea, which is both mathematically interesting, intuitive and intuitive.
 
 ## Project structure (what to read, what to modify)
 
-Read these first to understand execution flow and constraints:
+Read these first to understand execution flow and constraints and project structure:
 
 - `main.py`:
   - Orchestrates full training loop, logging, evaluation, checkpointing.
@@ -20,24 +20,24 @@ Read these first to understand execution flow and constraints:
 - `agents/**`:
   - Main research surface. Algorithm logic, losses, update rules, config (`get_config`).
   - Typical edit targets: actor/value objectives, representation losses, target updates,
-    sampling behavior, and config defaults specific to an agent.
+    sampling behavior, optimizers, regularizers and config defaults specific to an agent
 - `utils/networks.py` and related network files in `utils/**`:
   - Shared model components and neural building blocks used by agents.
-  - Allowed to modify only when needed to support agent-side research changes.
+  - Allowed to modify only when needed to support agent-side research changes (but not breaking backward compatibility).
 - `utils/datasets.py`, `utils/env_utils.py`, `utils/evaluation.py`, `utils/flax_utils.py`,
   `utils/log_utils.py`:
   - Infrastructure/data/evaluation/logging helpers.
-  - Treat as mostly stable; only network-supporting changes in `utils/**` are allowed.
+  - Treat as mostly stable; only network-supporting changes in `utils/**` are allowed (`networks.py`, `dual.py`, `vib.py`)
 
 Outputs to inspect after every run:
 
 - `results/<agent_name>/<exp_name>/eval.csv`:
-  - Ground-truth evaluation metrics.
-  - Contains per-task success metrics and `evaluation/overall_success`.
+  - Evaluation metrics for current experiment and algorithm.
+  - Contains per-task success metrics and `evaluation/overall_success` for the given environment.
   - This file determines keep/discard decisions.
 - `results/<agent_name>/<exp_name>/train.csv`:
   - Training diagnostics only (losses, value stats, etc.).
-  - Use for debugging or idea generation, not as primary ranking metric.
+  - Use for debugging, understanding of the training evolution or idea generation, not as primary ranking metric.
 - `results/<agent_name>/<exp_name>/flags.json`:
   - Exact run configuration used for reproducibility.
 
@@ -49,12 +49,12 @@ Out-of-scope / do not modify:
 
 ## Setup
 
-1. Create a research tag (example: `mar10`).
+1. Create a research tag (example: `mar11`).
 2. Ensure `master` stays unchanged. Never commit on `master`.
 3. Create and keep a dedicated baseline branch from `master`:
    - `git checkout master`
    - `git checkout -b autoresearch/<tag>-baseline`
-4. Run one baseline experiment and record metrics.
+4. Run one baseline experiment and record/read metrics.
 5. Create a .md file in the current working branch that explains what is done, what idea is tried etc (all changes must be specified here).
 6. Find best way to show which branch achieved best success rate (either by creating a file (e.g results.tsv) and commiting to it results from different branches or any other good way). But I must see which changes and what score/results were obtained for each experiment branch.
 7. The code is being run on single RTX 4090
@@ -64,13 +64,13 @@ Out-of-scope / do not modify:
 
 - Main entry point: `main.py`.
 - Main metric: success rate in `results/<agent_name>/<exp_name>/eval.csv`.
-- Primary score: latest `evaluation/overall_success` from `eval.csv`.
+- Primary score: latest `evaluation/overall_success` from `eval.csv`. Check also scores for intermediate steps, which should provide better signal what happend during training (decrease/increase in success rate)
 - Secondary score (tie-breaker): mean of the 5 task success columns in `eval.csv`.
 - Diagnostics (not ranking metric): `results/<agent_name>/<exp_name>/train.csv`.
 
 ## Hard constraints
 
-- Run with `--wandb_mode offline`.
+- Run with `--wandb_mode online`.
 - Do not modify `main.py` train/eval hyperparameter definitions (`TRAIN HYPERS` and `EVAL HYPERS` blocks).
 - Do not change evaluation logic in `main.py`/`utils/evaluation.py`.
 - Allowed code edits only:
@@ -145,12 +145,14 @@ After each run:
    - mean_task_success
    - status (`keep`, `discard`, `crash`)
    - short description
+6. Write down your observations, thoughts regarding experiment in the `thoughts.md` which summarizes the results obtained and insights.
 
 Status policy:
 
 - `keep`: strictly better `overall_success`, or equal `overall_success` with better `mean_task_success` and comparable complexity.
 - `discard`: valid run but not better.
 - `crash`: runtime failure, NaNs (either at eval or train), or malformed outputs.
+Make a short description what was tried and insights for each branch.
 
 ## Autonomous loop
 
@@ -160,11 +162,10 @@ Repeat until interrupted by user:
 2. Create new experiment branch from current best branch.
 3. Edit only allowed files.
 4. Commit.
-5. Parse metrics from `eval.csv` (+ inspect `train.csv` for debugging only).
-6. Log in `results.tsv`.
-7. Keep or discard branch by metric policy.
-
-Never ask for confirmation between iterations; continue autonomously.
+5. Parse metrics from `eval.csv` (+ inspect `train.csv` for debugging only and better understanding of the evolution of metrics).
+6. Check `thoughts.md` file (if exists) and get understanding what was tried in the best branch. 
+7. Log in `results.tsv`.
+8. Keep or discard branch by metric policy.
 
 ## Safety and reproducibility
 
@@ -175,4 +176,4 @@ Never ask for confirmation between iterations; continue autonomously.
 
 The idea is that you are a completely autonomous researcher trying things out. Use your vast knowledge of RL literature (representation learning, offline RL, goal-conditioned RL etc.).
 
-NEVER STOP: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working indefinitely until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
+NEVER STOP: Once the experiment loop has begun (after the initial setup), do NOT pause it to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working indefinitely until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
