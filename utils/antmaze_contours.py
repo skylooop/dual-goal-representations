@@ -273,7 +273,9 @@ def _encode_goals(agent: Any, goals: jnp.ndarray) -> jnp.ndarray:
     return goals
 
 
-def _compute_learned_value_grid(agent: Any, states_flat: jnp.ndarray, goals_flat: jnp.ndarray) -> jnp.ndarray:
+def _compute_learned_value_grid(
+    agent: Any, states_flat: jnp.ndarray, goals_flat: jnp.ndarray
+) -> jnp.ndarray:
     """Compute V(s,g) on a batch; return scalar value (min of ensemble)."""
     value_fn = _get_value_module(agent)
     goal_reps = _encode_goals(agent, goals_flat)
@@ -301,6 +303,7 @@ def _compute_learned_value_grad_grid(
         return (v1[0] + v2[0]) / 2.0
 
     grad_fn = jax.vmap(jax.grad(value_scalar), in_axes=0)
+    # Average gradients across the sample dimension. Expects states_flat of shape (num_grid_points * num_samples, obs_dim)
     grad_s = grad_fn(states_flat)
     policy_x = grad_s[:, x_index]
     policy_y = grad_s[:, y_index]
@@ -312,11 +315,7 @@ def _build_antmaze_grid_and_analytic(
     points_per_cell: int = 14,
     nu: float = 2.5,
     goal_xy_override: tuple[float, float] | None = None,
-) -> tuple[
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-    tuple, tuple, float, float, float, float,
-]:
+) -> tuple[Any, ...]:
     """Build grid (X, Y), obstacle mask, rects, bounds, and analytical Eikonal/FK values."""
     maze_map, goal_ij = _ogbench_antmaze_layout(maze_type)
     maze_unit = 4.0
@@ -339,7 +338,11 @@ def _build_antmaze_grid_and_analytic(
                 rects.append((cx - half, cy - half, cx + half, cy + half))
 
     obstacle_mask = _obstacle_mask_from_rects(X, Y, rects)
-    goal_xy = goal_xy_override if goal_xy_override is not None else _ij_to_xy(goal_ij, maze_unit=maze_unit)
+    goal_xy = (
+        goal_xy_override
+        if goal_xy_override is not None
+        else _ij_to_xy(goal_ij, maze_unit=maze_unit)
+    )
 
     v_fk = solve_fk_value_on_grid(x, y, obstacle_mask, goal_xy, nu)
     goal_idx = _nearest_free_idx(X, Y, obstacle_mask, goal_xy)
@@ -358,11 +361,24 @@ def _build_antmaze_grid_and_analytic(
     policy_fk_x, policy_fk_y = _compute_policy(v_fk_grad, obstacle_mask, hy, hx)
 
     return (
-        X, Y, x, y, hx, hy,
-        obstacle_mask, rects,
-        v_eik_plot, v_fk_plot, v_eik_lines, v_fk_lines,
-        policy_eik_x, policy_eik_y, policy_fk_x, policy_fk_y,
-        goal_xy, (x_min, x_max, y_min, y_max),
+        X,
+        Y,
+        x,
+        y,
+        hx,
+        hy,
+        obstacle_mask,
+        rects,
+        v_eik_plot,
+        v_fk_plot,
+        v_eik_lines,
+        v_fk_lines,
+        policy_eik_x,
+        policy_eik_y,
+        policy_fk_x,
+        policy_fk_y,
+        goal_xy,
+        (x_min, x_max, y_min, y_max),
     )
 
 
@@ -379,55 +395,117 @@ def plot_antmaze_learned_and_analytic(
     log_wandb: bool = False,
     goal_xy: tuple[float, float] | None = None,
     task_name: str | None = None,
+    dataset_samples: np.ndarray | jnp.ndarray | None = None,
+    max_dataset_samples: int = 100,
 ) -> str:
     """Plot 2x2: Eikonal value, Learned value; Eikonal policy, Learned policy. Save to save_dir."""
     agent = jax.device_put(agent, device=jax.devices("cpu")[0])
 
     (
-        X, Y, x, y, hx, hy,
-        obstacle_mask, rects,
-        v_eik_plot, v_fk_plot, v_eik_lines, v_fk_lines,
-        policy_eik_x, policy_eik_y, policy_fk_x, policy_fk_y,
-        goal_xy, (x_min, x_max, y_min, y_max),
-    ) = _build_antmaze_grid_and_analytic(maze_type, points_per_cell=points_per_cell, nu=nu, goal_xy_override=goal_xy)
+        X,
+        Y,
+        x,
+        y,
+        hx,
+        hy,
+        obstacle_mask,
+        rects,
+        v_eik_plot,
+        v_fk_plot,
+        v_eik_lines,
+        v_fk_lines,
+        policy_eik_x,
+        policy_eik_y,
+        policy_fk_x,
+        policy_fk_y,
+        goal_xy_eval,
+        (x_min, x_max, y_min, y_max),
+    ) = _build_antmaze_grid_and_analytic(
+        maze_type, points_per_cell=points_per_cell, nu=nu, goal_xy_override=goal_xy
+    )
 
     ny, nx = X.shape
+    num_grid_points = ny * nx
+
+    if dataset_samples is None:
+        dataset_samples_arr = np.zeros((1, obs_dim), dtype=np.float32)
+    else:
+        dataset_samples_arr = np.asarray(dataset_samples, dtype=np.float32)
+
+    # Subsample to avoid memory explosion and slowness on large dataset chunks
+    max_samples = max(1, max_dataset_samples)
+    if dataset_samples_arr.shape[0] > max_samples:
+        indices = np.random.choice(
+            dataset_samples_arr.shape[0], max_samples, replace=False
+        )
+        dataset_samples_arr = dataset_samples_arr[indices]
+
+    num_samples = dataset_samples_arr.shape[0]
+
     goal_vec = np.zeros(obs_dim, dtype=np.float32)
-    goal_vec[x_index] = goal_xy[0]
-    goal_vec[y_index] = goal_xy[1]
+    goal_vec[x_index] = goal_xy_eval[0]
+    goal_vec[y_index] = goal_xy_eval[1]
     goal_vec = jnp.array(goal_vec)
 
-    states_flat = np.zeros((ny * nx, obs_dim), dtype=np.float32)
-    states_flat[:, x_index] = X.ravel()
-    states_flat[:, y_index] = Y.ravel()
-    states_flat = jnp.array(states_flat)
-    goals_flat = jnp.broadcast_to(goal_vec[None, :], states_flat.shape)
+    grid_x = X.ravel().astype(np.float32)
+    grid_y = Y.ravel().astype(np.float32)
 
-    v_learned = np.array(_compute_learned_value_grid(agent, states_flat, goals_flat))
-    v_learned = v_learned.reshape(ny, nx)
-    v_learned = -v_learned
+    # Compute values in grid chunks to avoid building a huge (grid * samples) tensor.
+    grid_chunk_size = 2048
+    v_learned_flat = np.empty(num_grid_points, dtype=np.float32)
+    for grid_start in range(0, num_grid_points, grid_chunk_size):
+        grid_end = min(grid_start + grid_chunk_size, num_grid_points)
+        chunk_n = grid_end - grid_start
+
+        chunk_states = np.broadcast_to(
+            dataset_samples_arr[None, :, :], (chunk_n, num_samples, obs_dim)
+        ).copy()
+        chunk_states[:, :, x_index] = grid_x[grid_start:grid_end, None]
+        chunk_states[:, :, y_index] = grid_y[grid_start:grid_end, None]
+
+        chunk_states_flat = jnp.asarray(chunk_states.reshape(-1, obs_dim))
+        chunk_goals_flat = jnp.broadcast_to(goal_vec[None, :], chunk_states_flat.shape)
+        chunk_values = np.asarray(
+            _compute_learned_value_grid(agent, chunk_states_flat, chunk_goals_flat)
+        )
+        v_learned_flat[grid_start:grid_end] = chunk_values.reshape(
+            chunk_n, num_samples
+        ).mean(axis=1)
+
+    v_learned = -v_learned_flat.reshape(ny, nx)
     v_learned[obstacle_mask] = np.nanmax(v_learned[~obstacle_mask])
     v_learned_lines = np.ma.masked_where(obstacle_mask, v_learned)
 
-    policy_learned_x, policy_learned_y = _compute_learned_value_grad_grid(
-        agent, states_flat, goal_vec, x_index=x_index, y_index=y_index
+    # Computing JAX autograd at every (grid, sample) point is extremely expensive.
+    # For visualization, derive policy from the learned value field directly.
+    v_learned_grad = np.where(
+        obstacle_mask, np.nanmax(v_learned[~obstacle_mask]), v_learned
     )
-    policy_learned_x = np.array(policy_learned_x).reshape(ny, nx)
-    policy_learned_y = np.array(policy_learned_y).reshape(ny, nx)
-    policy_learned_x[obstacle_mask] = np.nan
-    policy_learned_y[obstacle_mask] = np.nan
+    policy_learned_x, policy_learned_y = _compute_policy(
+        v_learned_grad, obstacle_mask, hy, hx
+    )
 
     fig, axes = plt.subplots(2, 2, figsize=(12.0, 9.3), dpi=170)
     fig.patch.set_facecolor("#e9e9e9")
 
     levels_eik = np.linspace(np.nanmin(v_eik_plot), np.nanmax(v_eik_plot), 26)
     axes[0, 0].contourf(
-        X, Y, v_eik_plot,
-        levels=levels_eik, cmap="Blues_r", corner_mask=False, extend="max",
+        X,
+        Y,
+        v_eik_plot,
+        levels=levels_eik,
+        cmap="Blues_r",
+        corner_mask=False,
+        extend="max",
     )
     axes[0, 0].contour(
-        X, Y, v_eik_lines,
-        levels=levels_eik, colors="black", linewidths=0.35, alpha=0.72,
+        X,
+        Y,
+        v_eik_lines,
+        levels=levels_eik,
+        colors="black",
+        linewidths=0.35,
+        alpha=0.72,
     )
     label = f"{maze_type}/{task_name}" if task_name else maze_type
     axes[0, 0].set_title(f"Eikonal Value ({label})", fontsize=18, family="monospace")
@@ -435,45 +513,80 @@ def plot_antmaze_learned_and_analytic(
 
     levels_learned = np.linspace(np.nanmin(v_learned), np.nanmax(v_learned), 26)
     axes[0, 1].contourf(
-        X, Y, v_learned,
-        levels=levels_learned, cmap="Blues_r", corner_mask=False, extend="max",
+        X,
+        Y,
+        v_learned,
+        levels=levels_learned,
+        cmap="Blues_r",
+        corner_mask=False,
+        extend="max",
     )
     axes[0, 1].contour(
-        X, Y, v_learned_lines,
-        levels=levels_learned, colors="black", linewidths=0.35, alpha=0.72,
+        X,
+        Y,
+        v_learned_lines,
+        levels=levels_learned,
+        colors="black",
+        linewidths=0.35,
+        alpha=0.72,
     )
-    axes[0, 1].set_title(f"Learned Value (-V) ({label})", fontsize=18, family="monospace")
+    axes[0, 1].set_title(
+        f"Learned Value (-V) ({label})", fontsize=18, family="monospace"
+    )
     _style_axes_maze(axes[0, 1], rects, x_min, x_max, y_min, y_max, goal_xy=goal_xy)
 
     step = max(2, points_per_cell // 2)
     axes[1, 0].quiver(
-        X[::step, ::step], Y[::step, ::step],
-        policy_eik_x[::step, ::step], policy_eik_y[::step, ::step],
-        color="#148f90", angles="xy", scale_units="xy", scale=quiver_scale,
-        width=0.0034, alpha=0.93,
+        X[::step, ::step],
+        Y[::step, ::step],
+        policy_eik_x[::step, ::step],
+        policy_eik_y[::step, ::step],
+        color="#148f90",
+        angles="xy",
+        scale_units="xy",
+        scale=quiver_scale,
+        width=0.0034,
+        alpha=0.93,
     )
-    axes[1, 0].set_title(rf"Eikonal Policy ($-\nabla V$) ({label})", fontsize=18, family="monospace")
+    axes[1, 0].set_title(
+        rf"Eikonal Policy ($-\nabla V$) ({label})", fontsize=18, family="monospace"
+    )
     _style_axes_maze(axes[1, 0], rects, x_min, x_max, y_min, y_max, goal_xy=goal_xy)
 
     axes[1, 1].quiver(
-        X[::step, ::step], Y[::step, ::step],
-        policy_learned_x[::step, ::step], policy_learned_y[::step, ::step],
-        color="#148f90", angles="xy", scale_units="xy", scale=quiver_scale,
-        width=0.0034, alpha=0.93,
+        X[::step, ::step],
+        Y[::step, ::step],
+        policy_learned_x[::step, ::step],
+        policy_learned_y[::step, ::step],
+        color="#148f90",
+        angles="xy",
+        scale_units="xy",
+        scale=quiver_scale,
+        width=0.0034,
+        alpha=0.93,
     )
-    axes[1, 1].set_title(rf"Learned Policy ($-\nabla V$) ({label})", fontsize=18, family="monospace")
+    axes[1, 1].set_title(
+        rf"Learned Policy ($-\nabla V$) ({label})", fontsize=18, family="monospace"
+    )
     _style_axes_maze(axes[1, 1], rects, x_min, x_max, y_min, y_max, goal_xy=goal_xy)
 
     plt.tight_layout(pad=0.7, w_pad=0.5, h_pad=0.7)
     suffix = f"_{task_name}" if task_name else ""
-    save_path = os.path.join(save_dir, f"antmaze_{maze_type}{suffix}_learned_analytic_contours.png")
+    save_path = os.path.join(
+        save_dir, f"antmaze_{maze_type}{suffix}_learned_analytic_contours.png"
+    )
     fig.savefig(save_path, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
 
     if log_wandb:
         try:
             import wandb
-            key = f"contours/antmaze_{task_name}" if task_name else "contours/antmaze_learned_analytic"
+
+            key = (
+                f"contours/antmaze_{task_name}"
+                if task_name
+                else "contours/antmaze_learned_analytic"
+            )
             wandb.log({key: wandb.Image(save_path)})
         except Exception:
             pass

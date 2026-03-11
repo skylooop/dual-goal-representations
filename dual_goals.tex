@@ -1,0 +1,1634 @@
+\documentclass[final]{article} %
+\usepackage{iclr2026_conference,times}
+%
+\usepackage{amsthm}
+\usepackage{mathtools}
+\usepackage{url}
+\usepackage{enumitem}
+\usepackage{bbm}
+\usepackage{lipsum}
+\usepackage{graphicx}
+\usepackage[most]{tcolorbox}
+\usepackage{soul}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{wrapfig}
+\usepackage{lipsum}
+\usepackage{enumitem}
+\usepackage{multirow}
+\usepackage{tikz}
+\usepackage{booktabs}
+\usetikzlibrary{arrows.meta}
+\usepackage{basic_commands}
+\usepackage{algorithm}
+\usepackage{tabularew}
+\usepackage[endLComment=,italicComments=false]{algpseudocodex}
+\renewcommand{\algorithmicrequire}{\textbf{Input:}}
+\renewcommand{\algorithmicensure}{\textbf{Output:}}
+\renewcommand*{\ttdefault}{cmtt}
+\AddToHook{cmd/ttfamily/after}{\frenchspacing}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\definecolor{myred}{HTML}{F54254}
+\definecolor{myorange}{HTML}{FFB135}
+\definecolor{mygreen}{HTML}{10BD35}
+\definecolor{myblue}{HTML}{598BE7}
+\definecolor{mypurple}{HTML}{9A1C6B}
+\definecolor{plgray}{HTML}{999999}
+\renewcommand{\tt}[1]{\texttt{#1}}
+\renewcommand{\phi}{\varphi}
+\DeclarePairedDelimiterX{\infdivx}[2]{(}{)}{%
+  #1\;\delimsize\|\;#2%
+}
+\newcommand{\sh}[1]{{\color{myred}{\small\bf\sf [SP: #1]}}}
+\newcommand{\dm}[1]{{\color{myorange}{\small\bf\sf [DM: #1]}}}
+\newcommand{\pl}[1]{{\color{plgray} #1}}
+\newcommand{\methodname}{XYZ\xspace}
+\newlength{\myboxwidth}
+
+
+\linepenalty=1000
+\setlist[itemize]{itemsep=1pt, leftmargin=20pt}
+
+%
+%
+%
+%
+\newcommand{\cutsectionup}{\vspace{-2pt}}
+\newcommand{\cutsectiondown}{\vspace{-3pt}}
+\newcommand{\cutsubsectionup}{\vspace{-2pt}}
+\newcommand{\cutsubsectiondown}{\vspace{-3pt}}
+
+\hypersetup{urlcolor=myblue,citecolor=myblue,linkcolor=myblue}
+
+%
+%
+
+
+\title{Dual Goal Representations}
+%
+%
+
+%
+%
+%
+
+\author{Seohong Park\thanks{Equal contribution.}\:\:$^{1}$ \quad Deepinder Mann\footnotemark[1]\:\:$^{1}$ \quad Sergey Levine$^{1}$ \\
+$^{1}$University of California, Berkeley \\
+\texttt{\{seohong, dmann\}@berkeley.edu}
+}
+
+%
+%
+%
+%
+%
+%
+%
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+\iclrfinalcopy %
+\begin{document}
+
+
+
+\maketitle
+
+\begin{abstract}
+%
+In this work, we introduce \textbf{dual goal representations} for goal-conditioned reinforcement learning (GCRL).
+A dual goal representation characterizes a state by ``the set of temporal distances from all other states'';
+in other words, it encodes a state through its \emph{relations} to every other state, measured by temporal distance.
+This representation provides several appealing theoretical properties.
+First, it depends only on the intrinsic dynamics of the environment and is invariant to the original state representation.
+Second, it contains provably sufficient information to recover an optimal goal-reaching policy,
+while being able to filter out exogenous noise.
+Based on this concept, we develop a practical goal representation learning method
+that can be combined with any existing GCRL algorithm.
+Through diverse experiments on the OGBench task suite,
+we empirically show that dual goal representations consistently improve
+offline goal-reaching performance across $20$ state- and pixel-based tasks.
+
+Blog post: \url{https://seohong.me/blog/dual-representations/}
+\end{abstract}
+
+\begin{figure}[h!]
+    \centering
+    %
+    \includegraphics[width=0.8\textwidth]{figures/teaser.pdf}
+    \caption{
+    \footnotesize
+    \textbf{Dual goal representations.}
+    A dual goal representation $\phi^\vee(g)$ is
+    defined as the set of temporal distances $d^*(\cdot, g)$ from all other states.
+    This representation has a number of appealing properties:
+    it only depends on the intrinsic dynamics of the environment,
+    contains sufficient information to express an optimal goal-reaching policy,
+    and is able to discard exogenous noise.
+    }
+    \label{fig:teaser}
+    %
+\end{figure}
+
+\cutsectionup
+\section{Introduction}
+\cutsectiondown
+
+
+%
+
+Representation learning lies at the heart of modern machine learning.
+The successes of large-scale unsupervised pre-training~\citep{gpt3_brown2020, dalle2_ramesh2022} have shown that
+rich representations can enable both efficient adaptation and strong generalization across tasks.
+In this work, we study representation learning for an important class of reinforcement learning (RL) problems,
+goal-conditioned reinforcement learning (GCRL)~\citep{gcrl_kaelbling1993, ogbench_park2025}.
+The objective of GCRL is to train a multi-task policy capable of reaching any target state from any starting state in minimal time.
+Many real-world tasks, including navigation, object manipulation, and even games, naturally fit into this goal-reaching framework.
+
+
+%
+
+%
+%
+%
+%
+%
+%
+%
+%
+
+An important question in GCRL is how to represent goals.
+While many works simply use the original state observations
+provided by the environment to represent goal states~\citep{gcrl_kaelbling1993, ogbench_park2025},
+these observations are not necessarily best structured to describe goals (\ie, tasks),
+and often contain superfluous information, such as uncontrollable noise.
+%
+On the other hand, a good, well-designed goal representation can accelerate policy learning during training,
+improve goal-reaching performance at test time,
+and even potentially enable robust generalization to out-of-distribution goals.
+
+To achieve these benefits, we define two desiderata for an ideal goal representation.
+First, it must be able to capture sufficient information to represent an optimal goal-conditioned policy (\emph{sufficiency}).
+Second, it must be able to discard irrelevant information, such as background noise, that does not affect goal-reaching (\emph{noise invariance}).
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+
+Our key idea to achieve these desiderata is to represent a goal as \textbf{the set of temporal distances from all other states}.
+More specifically, we represent a goal as a \emph{functional} (\ie, a function from the state space to $\mathbb{R}$)
+that takes a state as input and outputs the corresponding temporal distance.
+%
+We call this a \textbf{dual goal representation}.
+We theoretically show that this dual goal representation satisfies both desiderata (sufficiency and noise invariance):
+\ie, we can represent an optimal policy solely based on the dual representation, and the representation is invariant to exogenous noise.
+%
+
+Building on this theoretical insight, we propose a new practical goal representation learning recipe for offline goal-conditioned RL.
+Our method first trains a parameterized goal-conditioned value function with an offline value learning algorithm to compute temporal distances.
+Then, we take the goal embedding of the learned value function as an approximate representation of the functional,
+which is then used as a goal representation for the policy.
+We demonstrate that this goal representation learning recipe consistently improves the performance and generalizability of goal-conditioned policies,
+across diverse robotic locomotion and manipulation environments.
+
+\textbf{Contributions.} Our main contributions are the theoretical formulation and empirical verification of dual goal representations.
+First, we theoretically show that dual goal representations can learn a sufficient and noise-invariant representation for optimal goal reaching.
+Second, we demonstrate that our empirical recipe based on this principle improves performance and generalization capabilities in practice,
+outperforming previous goal representation learning approaches on $20$ diverse goal-reaching tasks in robotic locomotion and manipulation.
+%
+%
+
+
+%
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+%
+
+\cutsectionup
+\section{Preliminaries}
+\cutsectiondown
+\label{sec:prelim}
+
+\textbf{Controlled Markov processes and goal-conditioned RL.}
+Let $\gS$ be a state space, $\gA$ be an action space,
+and $p(\pl{s'} \mid \pl{s}, \pl{a}): \gS \times \gA \to \Delta(\gS)$ be a transition dynamics kernel,
+where $\Delta(\gX)$ denotes the set of valid probability distributions over a space $\gX$
+and placeholder variables are denoted in gray.
+For theoretical results, we assume that $\gS$ and $\gA$ are discrete spaces.
+This is only for the sake of simplicity in discussion, and our results can be extended to continuous state spaces with appropriate modifications.
+
+A controlled Markov process (CMP)
+is defined by the tuple $\gM = (\gS, \gA, p)$.
+Given a goal-conditioned policy $\pi(\pl{a} \mid \pl{s}, \pl{g}): \gS \times \gS \to \Delta(\gA)$,
+and a goal-conditioned reward function $r(\pl{s}, \pl{g}): \gS \times \gS \to \sR$,
+we define $V^\pi(s, g)=\E_{\tau \sim p^\pi(\pl{\tau} \mid \pl{s_0} = s, g)}[\sum_{t=0}^\infty \gamma^t r(s_t, g)]$
+and $Q^\pi(s, a, g)=\E_{\tau \sim p^\pi(\pl{\tau} \mid \pl{s_0} = s, \pl{a_0} = a, g)}[\sum_{t=0}^\infty \gamma^t r(s_t, g)]$,
+where $\gamma \in (0, 1)$ denotes a discount factor
+and $p^\pi$ denotes the trajectory distribution induced by the policy and transition dynamics.
+Unless otherwise mentioned,
+we define $r(s, g)=\mathbb{I}(s=g)$, where $\mathbb{I}$ is the $0$-$1$ indicator function,
+and assume that the agent enters an absorbing state once it reaches the goal (\ie, it can get a reward of $1$ at most once).
+We define the optimal value functions as
+$V^*(s, g) = \max_{\pi:\gS \times \gS \to \Delta(\gA)} V^\pi(s, g)$ and
+$Q^*(s, a, g) = \max_{\pi:\gS \times \gS \to \Delta(\gA)} Q^\pi(s, a, g)$.
+We also define the \emph{temporal distance} function as $d^*(s, g) = \log_\gamma V^*(s, g)$.
+Note that, in deterministic environments, $d^*(s, g)$ corresponds to the length of a shortest path from $s$ to $g$.
+
+
+The objective of offline goal-conditioned RL is to find a goal-conditioned policy $\pi$
+that maximizes $V^\pi(s, g)$ for all $s, g \in \gS$,
+from a dataset $\gD = \{\tau^{(i)}\}_{i=1}^M$ consisting of
+state-action trajectories $\tau = (s_0, a_0, s_1, \ldots, s_T)$ with no environment interactions.
+
+\textbf{Block CMPs.}
+Some theoretical results in this work are built upon the block CMP (BCMP) framework~\citep{bmdp_du2019, ppe_efroni2022, acstate_lamb2022}.
+A BCMP is defined by a tuple $(\gS, \gZ, \gA, p, p^e, p^d)$,
+where $\gS$ is an observation space, $\gZ$ is a latent state space, $\gA$ is an action space,
+$p(\pl{z'} \mid \pl{z}, \pl{a}): \gZ \times \gA \to \gZ$ is a latent transition dynamics kernel,
+$p^e(\pl{s} \mid \pl{z}): \gZ \to \Delta(\gS)$ is an observation emission distribution,
+and $p^\ell(\pl{s}): \gS \to \gZ$ is a latent mapping function,
+such that $p^\ell(s) = z$ for all $z \in \gZ$ and $s \sim p^e(\pl{s} \mid z)$.
+Intuitively, a BCMP can be thought of as a latent CMP $(\gZ, \gA, p)$ augmented with noisy observations,
+such that the observation distributions from different latent states always have \emph{disjoint} supports (\ie, every observation maps to a unique latent state).
+
+
+In a BCMP, we define a goal-conditioned reward function as $r^\ell(s, g) = \mathbb{I}(p^\ell(s) = p^\ell(g))$.
+Note that this only depends on the latent states.
+Given a goal-conditioned policy, $\pi(\pl{a} \mid \pl{s}, \pl{g}): \gS \times \gS \to \Delta(\gA)$,
+we define the value and Q functions and temporal distance function similarly as before,
+but with the modified reward function $r^\ell$.
+The BCMP framework encompasses many real-world scenarios~\citep{ppe_efroni2022, acstate_lamb2022},
+including image-based robotic control
+(where latent states correspond to the ground-truth poses of the robot arm and objects,
+and the emission function corresponds to a noisy yet fully observable rendering of the current state).
+
+\cutsectionup
+\section{Dual Goal Representations}
+\cutsectiondown
+\label{sec:dgr}
+
+The main aim of this work is to find an effective goal representation $\phi(\pl{g}): \gS \to \gW$
+for a goal-conditioned policy $\pi(\pl{a} \mid \pl{s}, \phi(\pl{g}))$ parameterized by $\phi$,
+where $\gW$ denotes a latent representation space.
+A good goal representation can offer several benefits.
+During training, it can reduce the learning complexity of the policy network $\pi$
+by providing structured information about the goal state.
+During evaluation, it can help the agent generalize to unseen, potentially out-of-distribution goals.
+
+What constitutes an ideal goal representation?
+We define two desiderata.
+First, it must be able to capture enough information about the state to represent an optimal policy (\emph{sufficiency}).
+Second, it must be able to discard information irrelevant to goal-reaching (\emph{noise invariance}).
+In other words,
+an ideal goal representation should be able to maintain
+only a necessary \emph{and} sufficient amount of information to perform optimal goal-reaching.
+This will make the agent focus on only the controllable part of the state,
+enabling faster policy learning and better generalization.
+
+%
+
+\cutsubsectionup
+\subsection{The Idea}
+\cutsubsectiondown
+
+Our main idea to achieve these desiderata is
+to represent a goal as \textbf{the set of the temporal distances from all other states}.
+For example, in a discrete state space $\gS = \{s_1, s_2, \ldots, s_K\}$, this corresponds to
+the vector consisting of all temporal distances to that goal; \ie, $\phi(g) = [d^*(s_1, g), d^*(s_2, g), \ldots, d^*(s_K, g)]^\top$.
+In the general case, this representation corresponds to a \emph{function} from $\gS$ to $\sR$
+(such a function is called a \emph{functional}).
+
+Formally, for a CMP $\gM = (\gS, \gA, p)$,
+we define $\phi^\vee: \gS \to (\gS \to \sR)$ as
+\begin{align*}
+    \phi^\vee(g) = (s \mapsto d^*(s, g))
+\end{align*}
+for $s, g \in \gS$.
+In other words, $\phi^\vee(g)(s) = d^*(s, g)$.
+We call $\phi^\vee$ the \textbf{dual goal representation} (or simply dual representation) function of the CMP $\gM$.
+
+Intuitively, dual goal representations replace
+a goal state with its \emph{relations} to all other states, measured by temporal distance.
+This has several benefits.
+First, the resulting representation is \emph{invariant} to the original state representation given by the environment,
+as it depends only on the intrinsic temporal dynamics of the environment.
+Second, it can be shown that this representation retains sufficient information to represent an optimal goal-reaching policy,
+while being able to discard exogenous noise,
+as we formalize in the following section.
+
+
+
+
+\cutsubsectionup
+\subsection{Theoretical Properties}
+\cutsubsectiondown
+
+We now state two important theoretical properties of dual goal representations.
+The first property is sufficiency:
+
+\begin{theorem}[Sufficiency of Dual Goal Representations] \label{thm:suff}
+Let $\gM=(\gS, \gA, p)$ be a CMP and $\phi^\vee$ be its dual goal representation function.
+Then, there exists a deterministic policy $\pi^\vee: \gS \times \gS^\vee \to \gA$ that takes a dual goal representation as input,
+such that its induced policy $\tilde \pi: \gS \times \gS \to \gA$ defined as
+$\tilde \pi(s, g) := \pi^\vee(s, \phi^\vee(g))$ satisfies $V^{\tilde \pi} (s, g) = V^*(s, g)$ for all $s, g \in \gS$.
+\end{theorem}
+
+The proof can be found in \Cref{sec:proofs}.
+Intuitively, the above theorem states that the dual goal representation function $\phi^\vee$ retains enough information
+so that one can recover an optimal policy that depends only on dual goal representations.
+The second property is noise invariance:
+
+\begin{theorem}[Noise Invariance of Dual Goal Representations] \label{thm:min}
+Let $\gM=(\gS, \gZ, \gA, p, p^e, p^\ell)$ be a BCMP and $\phi^\vee$ be its dual goal representation function.
+Let $g_1, g_2 \in \gS$ be two goal observations from the same latent state; \ie, $p^\ell(g_1) = p^\ell(g_2)$.
+Then, they have the same dual goal representation; \ie, $\phi^\vee(g_1) = \phi^\vee(g_2)$.
+\end{theorem}
+
+Again, the proof can be found in \Cref{sec:proofs}.
+Intuitively, this theorem states that, under some technical assumptions (based on the BCMP framework described in \Cref{sec:prelim}),
+dual goal representations are invariant under exogenous noise in the observation space.
+Combining \Cref{thm:suff,thm:min}, we conclude that dual goal representations satisfy
+both desiderata described at the beginning of \Cref{sec:dgr}.
+%
+
+%
+\begin{tcolorbox}[
+  enhanced,
+  breakable,
+  float,
+  floatplacement=t!,
+  %
+  title=\textbf{Digressive remark:} Connections to other concepts in mathematics and machine learning,
+  colframe=myblue,
+  colback=myblue!8,
+  coltitle=white,
+  parbox=false,
+  left=5pt,
+  right=5pt,
+  %
+  %
+  %
+  %
+  toprule=2pt,
+  titlerule=1pt,
+  leftrule=1pt,
+  rightrule=1pt,
+  bottomrule=1pt,
+]
+The dual goal representation is based on the philosophy of a ``relative point of view'' 
+(\ie, understanding an object via its relation to all other objects).
+This is analogous to various concepts in mathematics and machine learning,
+and we highlight a few examples.
+In category theory,
+the \emph{Yoneda lemma} implies that we can identify an object
+through its morphisms to all other objects in the same category~\citep{category_riehl2017}.
+In kernel machines and functional analysis,
+the \emph{Riesz representation theorem} implies that we can uniquely represent a point in a Hilbert space
+as a linear functional in its dual space~\citep{real_folland1999, high_wainwright2019}.
+The dual goal representation is named after this analogy.
+\end{tcolorbox}
+
+\cutsectionup
+\section{Practical Instantiation}
+\cutsectiondown
+\label{sec:practical}
+
+There are two challenges with implementing a practical learning algorithm for dual goal representations.
+First, the functional form of dual goal representations cannot be directly implemented in practice,
+unless the state space is small and discrete
+(in which case we can represent a function as a finite-dimensional vector).
+Second, we need to know the temporal distance function $d^*$.
+
+\textbf{Approximating functionals.}
+We address the first challenge
+by employing a \emph{parameterized} temporal distance function.
+Namely, we model the temporal distance function as follows:
+\begin{align}
+    d^*(s, g) = f(\psi(s), \phi(g)),  \label{eq:dgr_agg}
+\end{align}
+where $\psi(\pl{s}): \gS \to \sR^{N}$ and $\phi(\pl{g}): \gS \to \sR^N$ are respectively the state and goal embeddings,
+and $f: \sR^{N} \times \sR^{N} \to \sR$ is a (simple) aggregation function that combines the information from both embeddings to compute the temporal distance.
+Then, we treat the output of the goal embedding, $\phi(g)$,
+as a practical finite-dimensional representation of the functional dual goal representation, $\phi^\vee(g)$.
+Intuitively, this makes $\phi$ capture temporal information about the goal,
+in the sense that we can compute the temporal distance by pairing with any other state $s$ via $f(\psi(s), \phi(g))$.
+
+For the aggregation function $f$, we use the following inner product parameterization: %
+\begin{align}
+    f(\psi(s), \phi(g)) = \psi(s)^\top \phi(g).
+\end{align}
+We note that this inner product form is \emph{universal}~\citep{metra_park2024},
+meaning that it is expressive enough to approximate any two-variable function (on a compact set) up to an arbitrary accuracy.
+
+
+
+\textbf{Approximating temporal distance.}
+Next, we approximate the temporal distance function $d^*$ in practice,
+using an existing offline goal-conditioned value learning algorithm.
+In particular, we employ goal-conditioned IQL~\citep{iql_kostrikov2022, ogbench_park2025} to approximate $d^*$
+(to be precise, a transformed variant of $d^*$ via $V^*$, as we explain below).
+While dual goal representations can be instantiated with any other goal-conditioned value learning (or temporal distance learning) algorithm,
+we find that goal-conditioned IQL generally leads to the best performance while remaining simple.
+
+Specifically, %
+goal-conditioned IQL trains a parameterized goal-conditioned value function $V(\pl{s}, \pl{g}) = f(\psi(\pl{s}), \phi(\pl{g})): \gS \times \gS \to \sR$
+and a goal-conditioned Q function $Q(\pl{s}, \pl{a}, \pl{g}): \gS \times \gA \times \gS \to \sR$ with the following losses~\citep{iql_kostrikov2022}:
+\begin{align}
+    L(\psi, \phi) &= \E_{s, a, g \sim \gD}\left[\ell^2_\kappa(f(\psi(s), \phi(g)) - \bar Q(s, a, g))\right], \\
+    L(Q) &= \E_{s, a, s', g \sim \gD}\left[(Q(s, a, g) - r(s, g) - \gamma f(\psi(s'), \phi(g)))^2\right],
+\end{align}
+where $\ell_\kappa^2$ denotes the expectile loss with expectile $\kappa$~\citep{iql_kostrikov2022}
+and $\bar Q$ denotes the target Q network~\citep{dqn_mnih2013}.
+
+If the reward function is given as the $0$-$1$ indicator function, $r(s, g) = \mathbb{I}(s = g)$,
+we have the relation $V^*(s, g) = \gamma^{d^*(s, g)}$ (\Cref{sec:prelim}).
+Hence, when the IQL losses converge,
+$f(\psi(s), \phi(g)) = \psi(s)^\top \phi(g)$ approximates this transformed temporal distance function, $V^*(s, g) = \gamma^{d^*(s, g)}$.
+In practice, 
+we use the $-1$-$0$ reward function (\ie, $r(s, g) = \mathbb{I}(s = g) - 1$)
+instead of the $0$-$1$ indicator function, following \citet{ogbench_park2025}.
+While this leads to a slightly different relation $V^*(s, g) = -(1-\gamma^{d^*(s, g)})/(1-\gamma)$,
+we found this version to work better in practice.
+Note that regardless of the choice of reward function,
+$f(\psi(s), \phi(g))$ still approximates a (transformed) temporal distance function.
+
+\textbf{Downstream offline goal-conditioned RL.}
+After obtaining a dual goal representation $\phi$,
+we train a parameterized goal-conditioned policy $\pi(\pl{a} \mid \pl{s}, \phi(\pl{g}))$
+(and optionally goal-conditioned value functions, $V^\mathrm{GCRL}(\pl{s}, \phi(\pl{g}))$ and $Q^\mathrm{GCRL}(\pl{s}, \pl{a}, \phi(\pl{g}))$)
+with an existing offline GCRL algorithm to perform downstream goal-conditioned policy learning.
+%
+Note that the choice of this downstream GCRL algorithm is orthogonal to
+the one used to approximate the temporal distance in the previous paragraph,
+and thus our method can be applied to any general GCRL algorithm.
+In this work, we apply dual goal representations to three different offline GCRL algorithms,
+goal-conditioned IVL (GCIVL)~\citep{iql_kostrikov2022, ogbench_park2025},
+contrastive RL (CRL)~\citep{crl_eysenbach2022},
+and goal-conditioned flow BC (GCFBC)~\citep{sharsa_park2025}.
+We describe the full goal-conditioned RL procedure in \Cref{alg:dgr},
+where $\ell_\kappa^2$ denotes the expectile loss with expectile $\kappa$~\citep{iql_kostrikov2022}
+and $\bar Q$ denotes the target Q network~\citep{dqn_mnih2013}.
+
+\begin{algorithm}[t!]
+\caption{Offline Goal-Conditioned RL with Dual Goal Representations}
+\label{alg:dgr}
+\begin{algorithmic}
+\footnotesize
+
+\State
+\LComment{\color{myblue} Dual goal representation learning}
+\State Initialize state representation $\psi(\pl{s})$, goal representation $\phi(\pl{g})$, Q function $Q(\pl{s}, \pl{a}, \pl{g})$
+\While{not converged}
+\State Sample batch $\{(s, a, s', g)^{(i)}\}_i$ from $\gD$
+\BeginBox[fill=white]
+\LComment{Train parameterized value function $f(\psi(\pl{s}), \phi(\pl{g}))$ with goal-conditioned IQL}
+\State Train $\psi$, $\phi$ by minimizing $\E[\ell^2_\kappa(f(\psi(s), \phi(g)) - \bar Q(s, a, g))]$
+\State Train $Q$ by minimizing $\E[(Q(s, a, g) - r(s, g) - \gamma f(\psi(s'), \phi(g)))^2]$
+\State Update $\bar Q$ using exponential moving averaging
+\EndBox
+\EndWhile
+
+\vspace{5pt}
+
+\LComment{\color{myblue} Downstream offline GCRL with dual goal representation (can be run in parallel with above)}
+\State Initialize policy $\pi(\pl{a} \mid \pl{s}, \phi(\pl{g}))$
+\State (If necessary) initialize representation-conditioned value functions $V^\mathrm{GCRL}(\pl{s}, \phi(\pl{g}))$, $Q^\mathrm{GCRL}(\pl{s}, \pl{a}, \phi(\pl{g}))$
+\While{not converged}
+\State Train $\pi$, $V^\mathrm{GCRL}$, $Q^\mathrm{GCRL}$ with any offline GCRL algorithm (\eg, GCBC, GCIVL, CRL)
+\EndWhile
+\State
+\Return $\pi(\pl{a} \mid \pl{s}, \phi(\pl{g}))$
+
+\end{algorithmic}
+\end{algorithm}
+
+
+\cutsectionup
+\section{Related Work}
+\cutsectiondown
+\label{sec:related}
+
+\textbf{Offline goal-conditioned RL.}
+At the intersection of offline RL~\citep{batch_lange2012, offline_levine2020} and goal-conditioned RL~\citep{gcrl_kaelbling1993},
+offline goal-conditioned RL aims to train a goal-reaching policy from an unlabeled (\ie, reward-free) dataset.
+Offline GCRL provides a principled way to pre-train policies, representations, and value functions in a self-supervised manner,
+which can later be adapted to downstream tasks~\citep{vip_ma2023, icvf_ghosh2023, u2o_kim2024, ogbench_park2025}.
+Prior works in offline goal-conditioned RL have proposed diverse approaches based on 
+implicit value learning~\citep{hiql_park2023},
+contrastive learning~\citep{crl_eysenbach2022, tdinfonce_zheng2024},
+metric learning~\citep{qrl_wang2023, cmd_myers2024},
+and planning~\citep{sptm_savinov2018, sorb_eysenbach2019, goplan_wang2024}.
+In this work, we aim to improve the performance and generalizability of goal-reaching agents
+by learning an effective goal representation (as with prior goal representation learning methods discussed below),
+%
+which can be orthogonally combined with any existing offline GCRL algorithm.
+%
+
+\textbf{Representation learning for RL.}
+%
+Representation learning has long been studied in RL~\citep{rep_echchahed2025}.
+By learning structured representations for states, actions, or other components in the given environment,
+prior work aims to facilitate learning and improve the generalization of RL agents.
+%
+%
+%
+%
+To this end, a variety of representation learning techniques~\citep{bisim_li2006, bisim_castro2019, lap_wu2019, curl_laskin2020, spr_schwarzer2021} have been proposed,
+and we refer to \citet{rep_echchahed2025} for a comprehensive literature review.
+Among representation learning algorithms,
+our practical method has a resemblance to
+the successor representations and successor features~\citep{sr_dayan1993, sf_barreto2017, fb_touati2021, zs_touati2023}.
+Unlike these works, we approximate \emph{optimal} temporal distances (or equivalently \emph{optimal} goal-conditioned values),
+which do not correspond to any successor features or representations with respect to a fixed policy.
+This enables us to directly learn a representation for optimal goal-reaching.
+
+\textbf{Representation learning for GCRL.}
+Our work is most closely related to previous studies that propose representation learning techniques
+based on goal-conditioned RL~\citep{tcn_sermanet2018, crl_eysenbach2022, rep_steccanella2022, vip_ma2023, hilp_park2024, tra_myers2025, byolgamma_lawson2025}.
+While the concept of dual goal representations and our theoretical results (\Cref{sec:dgr}) are, to our knowledge, novel,
+our practical learning algorithm for dual goal representations (\Cref{sec:practical}) bears similarity to several existing algorithms.
+Some previous works train temporal distance representations $\phi$
+using the metric parameterization $\|\phi(\pl{s}) - \phi(\pl{g})\|_2$
+with different metric learning algorithms~\citep{tcn_sermanet2018, rep_steccanella2022, vip_ma2023, hilp_park2024},
+which can potentially be viewed as variants of dual goal representations
+with a different aggregation function.
+%
+Our method differs from these works in two ways.
+First, we use $\phi$ for \emph{goal representations} (as our theory in \Cref{sec:dgr} suggests),
+whereas these works use $\phi$ for
+metric-based skill learning~\citep{hilp_park2024},
+state representations~\citep{vip_ma2023},
+reward shaping~\citep{tcn_sermanet2018, rep_steccanella2022, vip_ma2023},
+and planning~\citep{tcn_sermanet2018, rep_steccanella2022, vip_ma2023, hilp_park2024}.
+Second, unlike these works, we employ the more general inner product parameterization (instead of the metric one),
+which we show leads to better performance likely due to its universality.
+Similar to our work,
+TRA~\citep{tra_myers2025} employs the inner product parameterization to learn a goal representation.
+However, this method trains the representation with \emph{behavioral} temporal contrastive learning,
+which does not aim to approximate $d^*$;
+in contrast, we train a representation based on the \emph{optimal} value function (as our theory suggests),
+and we empirically show that our method leads to substantially better performance in \Cref{sec:exp}.
+
+%
+
+%
+%
+%
+%
+%
+%
+%
+
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+
+
+
+
+
+\cutsectionup
+\section{Experiments}
+\cutsectiondown
+\label{sec:exp}
+
+In this section, we empirically verify the effectiveness of dual goal representations
+through a series of experiments.
+In \Cref{sec:exp_pure}, we evaluate the performance of ``ideal'' dual representations (\Cref{sec:dgr})
+on discrete-space tasks as a proof of concept.
+Next, we evaluate our practical goal representation learning algorithm (\Cref{sec:practical})
+on a standard offline goal-conditioned RL benchmark~\citep{ogbench_park2025},
+comparing with various previous representation learning approaches.
+Then, we provide ablation studies of our method in \Cref{sec:exp_abl} to understand the importance of each component.
+
+In our experiments,
+we use $8$ random seeds for the main result table (\Cref{table:state_gcivl})
+and $4$ seeds for other tables and plots, unless otherwise stated.
+We report standard deviations in tables
+and $95\%$ confidence intervals in plots.
+In tables, we highlight numbers that are at and above $95\%$ of the best performance, following \citet{ogbench_park2025}.
+
+\cutsubsectionup
+\subsection{Results with ``Ideal'' Dual Representations}
+\cutsubsectiondown
+\label{sec:exp_pure}
+
+
+\begin{wrapfigure}{r}{0.4\textwidth}
+    \centering
+    \raisebox{0pt}[\dimexpr\height-1.0\baselineskip\relax]{
+        \begin{subfigure}[t]{1.0\linewidth}
+        \includegraphics[width=\linewidth]{figures/toy_env.pdf}
+        \end{subfigure}
+    }
+    \vspace{-17pt}
+    \caption{
+    \footnotesize
+    \textbf{The ``Lights Out'' puzzle.}
+    }
+    \vspace{-5pt}
+    \label{fig:toy_env}
+\end{wrapfigure}
+We begin our experiments by demonstrating how
+our original concept of dual representations
+(\ie, the ``ideal'' dual representation described in \Cref{sec:dgr}, not the approximated one in \Cref{sec:practical})
+can potentially improve goal-reaching capabilities.
+To this end,
+we consider a discrete puzzle environment where we can analytically pre-compute the temporal distances $d^*$.
+Specifically, we employ the discrete ``Lights Out'' puzzle~\citep{ogbench_park2025}.
+The aim of this puzzle is to reach a given goal configuration from an initial state,
+where pressing a button toggles the colors of that button and the adjacent ones (\Cref{fig:toy_env}).
+The dataset is collected by a uniform random policy,
+and we evaluate agents with five pre-defined state-goal pairs on two different puzzle sizes,
+\tt{4x5} and \tt{4x6}~\citep{ogbench_park2025}.\footnote{Note that these puzzle tasks are tabular variants of the ones in OGBench~\citep{ogbench_park2025}.}
+
+\begin{wrapfigure}{r}{0.45\textwidth}
+    \centering
+    \vspace{9pt}
+    \raisebox{0pt}[\dimexpr\height-1.0\baselineskip\relax]{
+        \begin{subfigure}[t]{1.0\linewidth}
+        \includegraphics[width=\linewidth]{figures/toy_puzzle.pdf}
+        \end{subfigure}
+    }
+    \vspace{-14pt}
+    \caption{
+    \footnotesize
+    \textbf{Original vs. dual representations.}
+    }
+    \vspace{-3pt}
+    \label{fig:toy_puzzle}
+\end{wrapfigure}
+On these tasks, we compare the performance of the original and dual representations.
+They are both trained with goal-conditioned DQN~\citep{dqn_mnih2013}.
+For dual representations, to reduce dimensionality, we randomly sample $64$ states $\{s_i\}_{i=1}^{64}$
+(\ie, $64$ random board configurations),
+and use $[d^*(s_1, g), \ldots, d^*(s_{64}, g)]^\top$ as the representation of $g$.
+In this experiment, we use the dual representation for both states and goals.
+We present the comparison result in \Cref{fig:toy_puzzle}.
+The result suggests that our dual representations substantially improve training speed and goal-reaching performance.
+Note that even though the dual representation $\phi^\vee$ is \emph{bijective} in this case,
+it provides structured (processed) information about the temporal dynamics,
+which makes policy learning significantly easier.
+This highlights the benefits of using a structured representation. 
+
+{\textbf{Disclaimer:}}
+In this experiment, our goal is to show how dual representations improve performance in the \emph{ideal} case
+(as a proof of concept),
+and we use privileged information about ground-truth temporal distances.
+In the following section,
+we demonstrate the performance of practical dual goal representations without such privileged information.
+
+
+\cutsubsectionup
+\subsection{Results on OGBench}
+\cutsubsectiondown
+\label{sec:exp_ogb}
+
+Next, we evaluate our practical algorithm for dual goal representations (\Cref{alg:dgr})
+on OGBench~\citep{ogbench_park2025}, a benchmark suite for offline goal-conditioned RL algorithms.
+
+
+\textbf{Tasks and datasets.}
+We employ $13$ state-based and $7$ pixel-based tasks from OGBench
+across robotic navigation and manipulation (\Cref{fig:envs}).
+In navigation tasks (\tt{\{point, ant, humanoid\}maze}),
+the aim is to control a robot body
+(from a single point to a complex humanoid robot with $21$ degrees of freedom)
+to reach a desired goal location in a maze.
+In \tt{antsoccer},
+the agent must control a quadrupedal robot to dribble a soccer ball to a desired location.
+In manipulation tasks (\tt{cube}, \tt{scene}, \tt{puzzle}),
+the agent must control a robotic arm
+to manipulate cubes, re-arrange everyday objects, or solve a combinatorial puzzle.
+In pixel-based environments,
+the agent must perform robotic manipulation solely from $64 \times 64 \times 3$-sized image observations.
+We use the standard \tt{navigate} or \tt{play} datasets for these tasks,
+where the datasets are collected by task-agnostic ``play''-style~\citep{play_lynch2019} demonstrations
+that randomly perform diverse atomic behaviors
+(\eg, continuously reaching random locations or performing random button presses).
+
+\textbf{Previous goal representation learning algorithms.}
+We compare dual goal representations with five previous goal representation learning methods:
+Original, VIB~\citep{recon_shah2021, hiql_park2023}, VIP~\citep{vip_ma2023}, TRA~\citep{tra_myers2025}, and BYOL-$\gamma$~\citep{byolgamma_lawson2025}.
+Original (``Orig'') is a baseline that does not use any representations (\ie, $\phi(g) = g$).
+VIB~\citep{recon_shah2021, hiql_park2023} trains goal representations
+via a variational information bottleneck (VIB) within a goal-conditioned value function or policy.
+VIP~\citep{vip_ma2023} trains metric-based goal representations
+with a goal-conditioned value learning algorithm.
+TRA~\citep{tra_myers2025} trains contrastive goal representations
+with behavioral contrastive learning~\citep{crl_eysenbach2022}.
+BYOL-$\gamma$~\citep{byolgamma_lawson2025} trains self-predictive goal representations with temporal self-supervised learning.
+We refer to \Cref{sec:impl_details} for the full implementation details about these methods.
+
+\textbf{Downstream offline GCRL algorithms.}
+We measure the effectiveness of goal representations
+by training a parameterized goal-conditioned policy $\pi(\pl{a} \mid \pl{s}, \phi(\pl{g}))$
+with downstream offline GCRL algorithms, as described in \Cref{alg:dgr}.
+To extensively assess the performance of goal representations,
+we consider three downstream algorithms across diverse categories:
+goal-conditioned implicit V-learning (GCIVL)~\citep{iql_kostrikov2022, ogbench_park2025},
+contrastive RL (CRL)~\citep{crl_eysenbach2022},
+and goal-conditioned flow behavioral cloning (GCFBC)~\citep{sharsa_park2025}.
+We refer to \Cref{sec:impl_details} for full details.
+
+\begin{table}[t!]
+\caption{
+\footnotesize
+\textbf{Results on state-based tasks with GCIVL as the downstream algorithm.}
+Our dual goal representation mostly achieves the best performance among goal representation learning methods.
+}
+\label{table:state_gcivl}
+\centering
+\scalebox{0.9}
+{
+\setlength{\myboxwidth}{2.7pt}
+
+\begin{tabularew}{l*{6}{>{\spew{.5}{+1}}r@{\,}l}}
+\toprule
+\multicolumn{1}{l}{\tt{Environment}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{Orig} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{VIB} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{VIP} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{TRA} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{BYOL-$\gamma$} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{\color{myblue}Dual} \makebox[\myboxwidth]{}} \\
+\midrule
+\tt{pointmaze-medium-navigate-v0} & \tt{\color{myblue}{78}} &{\tiny $\pm$\tt{8}} & \tt{69} &{\tiny $\pm$\tt{13}} & \tt{0} &{\tiny $\pm$\tt{1}} & \tt{3} &{\tiny $\pm$\tt{6}} & \tt{37} &{\tiny $\pm$\tt{7}} & \tt{\color{myblue}{76}} &{\tiny $\pm$\tt{7}} \\
+\tt{pointmaze-large-navigate-v0} & \tt{\color{myblue}{52}} &{\tiny $\pm$\tt{6}} & \tt{\color{myblue}{50}} &{\tiny $\pm$\tt{7}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{1} &{\tiny $\pm$\tt{2}} & \tt{22} &{\tiny $\pm$\tt{12}} & \tt{46} &{\tiny $\pm$\tt{6}} \\
+\tt{antmaze-medium-navigate-v0} & \tt{71} &{\tiny $\pm$\tt{4}} & \tt{68} &{\tiny $\pm$\tt{4}} & \tt{31} &{\tiny $\pm$\tt{5}} & \tt{22} &{\tiny $\pm$\tt{15}} & \tt{39} &{\tiny $\pm$\tt{5}} & \tt{\color{myblue}{75}} &{\tiny $\pm$\tt{4}} \\
+\tt{antmaze-large-navigate-v0} & \tt{16} &{\tiny $\pm$\tt{3}} & \tt{9} &{\tiny $\pm$\tt{3}} & \tt{9} &{\tiny $\pm$\tt{2}} & \tt{22} &{\tiny $\pm$\tt{12}} & \tt{11} &{\tiny $\pm$\tt{5}} & \tt{\color{myblue}{28}} &{\tiny $\pm$\tt{11}} \\
+\tt{antmaze-giant-navigate-v0} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} \\
+\tt{humanoidmaze-medium-navigate-v0} & \tt{27} &{\tiny $\pm$\tt{3}} & \tt{24} &{\tiny $\pm$\tt{2}} & \tt{7} &{\tiny $\pm$\tt{3}} & \tt{21} &{\tiny $\pm$\tt{3}} & \tt{18} &{\tiny $\pm$\tt{5}} & \tt{\color{myblue}{29}} &{\tiny $\pm$\tt{3}} \\
+\tt{humanoidmaze-large-navigate-v0} & \tt{\color{myblue}{3}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{3}} &{\tiny $\pm$\tt{1}} & \tt{1} &{\tiny $\pm$\tt{0}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{3}} &{\tiny $\pm$\tt{2}} \\
+\tt{antsoccer-arena-navigate-v0} & \tt{\color{myblue}{47}} &{\tiny $\pm$\tt{4}} & \tt{34} &{\tiny $\pm$\tt{4}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{8} &{\tiny $\pm$\tt{2}} & \tt{11} &{\tiny $\pm$\tt{4}} & \tt{31} &{\tiny $\pm$\tt{3}} \\
+\tt{cube-single-play-v0} & \tt{52} &{\tiny $\pm$\tt{3}} & \tt{\color{myblue}{90}} &{\tiny $\pm$\tt{3}} & \tt{40} &{\tiny $\pm$\tt{7}} & \tt{40} &{\tiny $\pm$\tt{5}} & \tt{51} &{\tiny $\pm$\tt{11}} & \tt{\color{myblue}{89}} &{\tiny $\pm$\tt{3}} \\
+\tt{cube-double-play-v0} & \tt{35} &{\tiny $\pm$\tt{5}} & \tt{33} &{\tiny $\pm$\tt{3}} & \tt{3} &{\tiny $\pm$\tt{2}} & \tt{7} &{\tiny $\pm$\tt{2}} & \tt{6} &{\tiny $\pm$\tt{4}} & \tt{\color{myblue}{60}} &{\tiny $\pm$\tt{4}} \\
+\tt{scene-play-v0} & \tt{46} &{\tiny $\pm$\tt{3}} & \tt{58} &{\tiny $\pm$\tt{1}} & \tt{23} &{\tiny $\pm$\tt{6}} & \tt{46} &{\tiny $\pm$\tt{6}} & \tt{44} &{\tiny $\pm$\tt{9}} & \tt{\color{myblue}{72}} &{\tiny $\pm$\tt{6}} \\
+\tt{puzzle-3x3-play-v0} & \tt{5} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{14}} &{\tiny $\pm$\tt{3}} & \tt{3} &{\tiny $\pm$\tt{1}} & \tt{5} &{\tiny $\pm$\tt{1}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{5} &{\tiny $\pm$\tt{1}} \\
+\tt{puzzle-4x4-play-v0} & \tt{14} &{\tiny $\pm$\tt{1}} & \tt{6} &{\tiny $\pm$\tt{3}} & \tt{1} &{\tiny $\pm$\tt{1}} & \tt{10} &{\tiny $\pm$\tt{3}} & \tt{1} &{\tiny $\pm$\tt{2}} & \tt{\color{myblue}{23}} &{\tiny $\pm$\tt{3}} \\
+\midrule
+\tt{Average} & \tt{34} &{\tiny $\pm$\tt{1}} & \tt{35} &{\tiny $\pm$\tt{2}} & \tt{9} &{\tiny $\pm$\tt{1}} & \tt{15} &{\tiny $\pm$\tt{2}} & \tt{19} &{\tiny $\pm$\tt{2}} & \tt{\color{myblue}{41}} &{\tiny $\pm$\tt{2}} \\
+\bottomrule
+\end{tabularew}
+
+\vspace{-20pt}
+
+}
+\end{table}
+
+
+
+
+
+
+
+\cutsubsectionup
+\subsubsection{Results on State-Based Tasks}
+\cutsubsectiondown
+\label{sec:exp_state}
+We report the performance of six goal representation learning methods
+combined with three downstream GCRL algorithms ($18$ combinations in total)
+on $13$ state-based OGBench environments
+in \Cref{table:state_gcivl} above and \Cref{table:state_crl,table:state_gcfbc} in \Cref{sec:add_results}.
+These results suggest that
+our dual goal representations achieve the best average performance in all three settings,
+outperforming both the previous representation learning methods and the original representations
+on most tasks.
+Notably, our method performs particularly well on \tt{cube} tasks,
+in some cases improving performance by $3\times$ compared to the ``original'' baseline (\Cref{table:state_crl}).
+Moreover, unlike previous algorithms such as VIB, VIP, and TRA,
+our method shows the least sensitivity to the choice of downstream offline GCRL algorithms.
+
+\begin{table}[t!]
+\caption{
+\footnotesize
+\textbf{Results on pixel-based tasks.}
+Dual goal representations achieve the best performance on five out of seven pixel-based tasks.
+All goal representation learning methods struggle with the \tt{puzzle} tasks,
+likely due to the use of ``late fusion'' (see \Cref{sec:exp_pixel}).
+}
+\label{table:pixel}
+\centering
+\scalebox{0.9}
+{
+
+\setlength{\myboxwidth}{2.1pt}
+
+\begin{tabularew}{l*{6}{>{\spew{.5}{+1}}r@{\,}l}}
+\toprule
+\multicolumn{1}{l}{\tt{Environment}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{Orig} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{VIB} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{VIP} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{TRA} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{BYOL-$\gamma$} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{\color{myblue}Dual} \makebox[\myboxwidth]{}} \\
+\midrule
+\tt{visual-antmaze-medium-navigate-v0} & \tt{66} &{\tiny $\pm$\tt{4}} & \tt{18} &{\tiny $\pm$\tt{9}} & \tt{30} &{\tiny $\pm$\tt{7}} & \tt{48} &{\tiny $\pm$\tt{4}} & \tt{32} &{\tiny $\pm$\tt{5}} & \tt{\color{myblue}{78}} &{\tiny $\pm$\tt{4}} \\
+\tt{visual-antmaze-large-navigate-v0} & \tt{26} &{\tiny $\pm$\tt{5}} & \tt{5} &{\tiny $\pm$\tt{2}} & \tt{9} &{\tiny $\pm$\tt{1}} & \tt{13} &{\tiny $\pm$\tt{3}} & \tt{9} &{\tiny $\pm$\tt{4}} & \tt{\color{myblue}{40}} &{\tiny $\pm$\tt{4}} \\
+\tt{visual-cube-single-play-v0} & \tt{53} &{\tiny $\pm$\tt{4}} & \tt{18} &{\tiny $\pm$\tt{19}} & \tt{39} &{\tiny $\pm$\tt{6}} & \tt{31} &{\tiny $\pm$\tt{24}} & \tt{35} &{\tiny $\pm$\tt{8}} & \tt{\color{myblue}{58}} &{\tiny $\pm$\tt{5}} \\
+\tt{visual-cube-double-play-v0} & \tt{\color{myblue}{9}} &{\tiny $\pm$\tt{2}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{3} &{\tiny $\pm$\tt{2}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{9}} &{\tiny $\pm$\tt{2}} \\
+\tt{visual-scene-play-v0} & \tt{\color{myblue}{25}} &{\tiny $\pm$\tt{2}} & \tt{6} &{\tiny $\pm$\tt{3}} & \tt{4} &{\tiny $\pm$\tt{1}} & \tt{15} &{\tiny $\pm$\tt{6}} & \tt{10} &{\tiny $\pm$\tt{8}} & \tt{\color{myblue}{26}} &{\tiny $\pm$\tt{5}} \\
+\tt{visual-puzzle-3x3-play-v0} & \tt{\color{myblue}{22}} &{\tiny $\pm$\tt{2}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} \\
+\tt{visual-puzzle-4x4-play-v0} & \tt{\color{myblue}{65}} &{\tiny $\pm$\tt{4}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} \\
+\bottomrule
+\end{tabularew}
+
+}
+\end{table}
+
+
+
+\cutsubsectionup
+\subsubsection{Results on Pixel-Based Tasks}
+\cutsubsectiondown
+\label{sec:exp_pixel}
+Next, we present the comparison results on pixel-based tasks in \Cref{table:pixel}.
+We use GCIVL as the base offline GCRL algorithm,
+given its strongest average performance in the state-based case.
+As in \Cref{sec:exp_state},
+the results suggest that
+our dual goal representation outperforms the other five alternative representations
+(or at least performs equally well)
+on five out of seven tasks.
+
+\textbf{Negative results.}
+However, we found that no representation learning methods (including ours),
+achieve non-zero performance on \tt{visual-puzzle} tasks (\Cref{table:pixel}).
+Given their reasonable performance on the equivalent state-based \tt{puzzle} tasks (\Cref{table:state_gcivl}),
+this failure is likely related to handling visual observations.
+
+\begin{wraptable}{r}{0.42\textwidth}
+    \centering
+    \vspace{-12pt}
+    \caption{
+    \footnotesize
+    \textbf{Early vs. late fusion.}
+    }
+    \vspace{-5pt}
+    \label{table:fusion}
+    \raisebox{0pt}[\dimexpr\height-1.0\baselineskip\relax]{
+    \scalebox{0.9}{
+        \begin{tabularew}{l*{2}{>{\spew{.5}{+1}}r@{\,}l}}
+        \toprule
+        \multicolumn{1}{l}{\tt{Environment}} & \multicolumn{2}{c}{\tt{Early}} & \multicolumn{2}{c}{\tt{Late}} \\
+        \midrule
+        \tt{visual-puzzle-3x3} & \tt{22} &{\tiny $\pm$\tt{2}} & \tt{0} &{\tiny $\pm$\tt{0}} \\
+        \tt{visual-puzzle-4x4} & \tt{65} &{\tiny $\pm$\tt{4}} & \tt{0} &{\tiny $\pm$\tt{0}} \\
+        \bottomrule
+        \end{tabularew}
+    }
+    }
+    \vspace{-2pt}
+\end{wraptable}
+We hypothesize that the failure stems from differences between early and late fusion
+of visual state and goal observations.
+Typically, a vanilla goal-conditioned policy $\pi(\pl{a} \mid \pl{s}, \pl{g})$
+first concatenates $s$ and $g$ along the depth dimension (forming a $64 \times 64 \times (3 + 3)$-sized image)
+and passes it to a convolutional neural network (this is often called ``early fusion'').
+However, when using a representation-conditioned policy $\pi(\pl{a} \mid \pl{s}, \phi(\pl{g}))$,
+we cannot directly use early fusion as $g$ needs to be processed separately.
+The problem is that, early fusion generally leads to better performance in visual robotics tasks~\citep{early_walsman2019, efvla_huang2024}.
+To verify this, we compare the performance of \emph{vanilla} GCIVL with early and late fusion.
+\Cref{table:fusion} shows the results on \tt{puzzle-\{3x3, 4x4\}}, suggesting that the use of late fusion
+is indeed likely the cause of the poor performance of representation learning-based approaches on these tasks.
+Given this evidence,
+we believe this failure may be addressed
+by modifying the representation function to be aware of the current state as well,
+which we leave for future work.
+
+
+
+\cutsubsectionup
+\subsection{Q\&As}
+\cutsubsectiondown
+\label{sec:exp_abl}
+
+In this section, we present additional discussions and ablations through the following Q\&As. 
+
+%
+
+\ul{\textbf{Q: Are dual goal representations indeed robust to noise?}}
+
+\begin{wrapfigure}{r}{0.6\textwidth}
+    \centering
+    \vspace{-2pt}
+    \raisebox{0pt}[\dimexpr\height-1.0\baselineskip\relax]{
+        \begin{subfigure}[t]{1.0\linewidth}
+        \includegraphics[width=\linewidth]{figures/noisy.pdf}
+        \end{subfigure}
+    }
+    \vspace{-15pt}
+    \caption{
+    \footnotesize
+    %
+    \textbf{Dual representations are robust to noise.}
+    }
+    \vspace{-5pt}
+    \label{fig:noisy}
+\end{wrapfigure}
+\textbf{A:}
+Our theory (\Cref{thm:min}) suggests that dual goal representations can, in principle, be invariant to exogenous noise.
+To empirically verify this property in practice,
+we evaluate the original and dual goal representations
+in three ``noisy'' environments (with GCIVL as the downstream GCRL algorithm),
+where we add Gaussian noise to the evaluation goals.
+This assesses the robustness of the two representations to out-of-distribution goals at test time.
+\Cref{fig:noisy} presents the comparison results.
+The results tell us that our dual representation indeed exhibits better robustness than the original one,
+as suggested by the theory.
+
+
+\ul{\textbf{Q: Can we use other aggregation (parameterization) functions for dual representations?}}
+
+\begin{table}[h!]
+\caption{
+\footnotesize
+\textbf{Dual representations with different parameterizations.}
+}
+\label{table:param}
+\centering
+\scalebox{0.9}
+{
+
+\setlength{\myboxwidth}{8.5pt}
+
+\begin{tabularew}{l*{2}{>{\spew{.5}{+1}}r@{\,}l}}
+\toprule
+\multicolumn{1}{l}{\tt{Environment}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{Dual (Symmetric)} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{\color{myblue}Dual (Inner Product)} \makebox[\myboxwidth]{}} \\
+\midrule
+\tt{pointmaze-medium-navigate-v0} & \tt{\color{myblue}{73}} &{\tiny $\pm$\tt{13}} & \tt{\color{myblue}{76}} &{\tiny $\pm$\tt{3}} \\
+\tt{pointmaze-large-navigate-v0} & \tt{43} &{\tiny $\pm$\tt{11}} & \tt{\color{myblue}{46}} &{\tiny $\pm$\tt{8}} \\
+\tt{antmaze-medium-navigate-v0} & \tt{\color{myblue}{77}} &{\tiny $\pm$\tt{7}} & \tt{\color{myblue}{75}} &{\tiny $\pm$\tt{5}} \\
+\tt{antmaze-large-navigate-v0} & \tt{23} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{35}} &{\tiny $\pm$\tt{7}} \\
+\tt{antmaze-giant-navigate-v0} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{1}} &{\tiny $\pm$\tt{0}} \\
+\tt{humanoidmaze-medium-navigate-v0} & \tt{23} &{\tiny $\pm$\tt{2}} & \tt{\color{myblue}{30}} &{\tiny $\pm$\tt{4}} \\
+\tt{humanoidmaze-large-navigate-v0} & \tt{\color{myblue}{3}} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{3}} &{\tiny $\pm$\tt{2}} \\
+\tt{antsoccer-arena-navigate-v0} & \tt{\color{myblue}{30}} &{\tiny $\pm$\tt{3}} & \tt{\color{myblue}{31}} &{\tiny $\pm$\tt{3}} \\
+\tt{cube-single-play-v0} & \tt{66} &{\tiny $\pm$\tt{4}} & \tt{\color{myblue}{90}} &{\tiny $\pm$\tt{4}} \\
+\tt{cube-double-play-v0} & \tt{48} &{\tiny $\pm$\tt{6}} & \tt{\color{myblue}{61}} &{\tiny $\pm$\tt{4}} \\
+\tt{scene-play-v0} & \tt{\color{myblue}{82}} &{\tiny $\pm$\tt{8}} & \tt{71} &{\tiny $\pm$\tt{6}} \\
+\tt{puzzle-3x3-play-v0} & \tt{\color{myblue}{5}} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{5}} &{\tiny $\pm$\tt{0}} \\
+\tt{puzzle-4x4-play-v0} & \tt{\color{myblue}{24}} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{23}} &{\tiny $\pm$\tt{3}} \\
+\midrule
+\tt{Average} & \tt{38} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{42}} &{\tiny $\pm$\tt{1}} \\
+\bottomrule
+\end{tabularew}
+
+}
+\vspace{5pt}
+\end{table}
+
+\textbf{A:}
+In \Cref{sec:practical},
+we approximate a functional using the inner product aggregation function,
+$f(\psi(s), \phi(g)) = \psi(s)^\top \phi(g)$.
+However, this is not the only possible option.
+For example, we can use other parameterizations,
+such as the symmetric norm (metric) parameterization, $f(\psi(s), \phi(g)) = \|\phi(s) - \phi(g)\|_2$ with $\psi = \phi$.
+%
+In particular, if we employ this metric parameterization,
+our dual representations become similar to previous temporal metric embedding methods~\citep{tcn_sermanet2018, vip_ma2023, hilp_park2024}.
+To understand how different aggregation functions affect performance,
+we evaluate dual goal representations with the two parameterizations above (with GCIVL as the downstream GCRL algorithm),
+and present the results in \Cref{table:param}.
+%
+%
+The results show that our inner product representation generally leads to better performance
+than the metric one when used as a goal representation.
+%
+We believe this is likely due to the universality of the inner product function (\Cref{sec:practical}),
+whereas the metric parameterization is provably not universal and thus potentially less expressive in representing goals
+(though this parameterization can still be useful for other purposes; see \citet{vip_ma2023, hilp_park2024}).
+
+%
+%
+
+%
+%
+%
+%
+%
+%
+
+%
+%
+
+\clearpage
+
+\ul{\textbf{Q: Can't we directly extract a policy from the temporal distance function $\bm{f(\psi(\pl{s}), \phi(\pl{g}))}$?}}
+
+\begin{wraptable}{r}{0.52\textwidth}
+    \centering
+    \vspace{-13pt}
+    \caption{
+    \footnotesize
+    \textbf{Directly extracting a policy from the temporal distance function often degrades performance.}
+    In this experiment, we use GCIVL for both $f$ and $V^\mathrm{GCRL}$ to enable an apples-to-apples comparison.
+    }
+    \vspace{0pt}
+    \label{table:direct}
+    \raisebox{0pt}[\dimexpr\height-1.0\baselineskip\relax]{
+    \scalebox{0.9}{
+    
+\begin{tabularew}{l*{2}{>{\spew{.5}{+1}}r@{\,}l}}
+\toprule
+\multicolumn{1}{l}{\tt{Environment}} & \multicolumn{2}{c}{\tt{Dual (Direct)}} & \multicolumn{2}{c}{\tt{\color{myblue}Dual}} \\
+\midrule
+\tt{antmaze-large} & \tt{\color{myblue}{58}} &{\tiny $\pm$\tt{6}} & \tt{28} &{\tiny $\pm$\tt{2}} \\
+\tt{humanoidmaze-medium} & \tt{17} &{\tiny $\pm$\tt{3}} & \tt{\color{myblue}{28}} &{\tiny $\pm$\tt{2}} \\
+\tt{antsoccer-arena} & \tt{16} &{\tiny $\pm$\tt{4}} & \tt{\color{myblue}{21}} &{\tiny $\pm$\tt{2}} \\
+\tt{cube-double} & \tt{42} &{\tiny $\pm$\tt{4}} & \tt{\color{myblue}{49}} &{\tiny $\pm$\tt{3}} \\
+\tt{scene-play} & \tt{50} &{\tiny $\pm$\tt{4}} & \tt{\color{myblue}{71}} &{\tiny $\pm$\tt{6}} \\
+\tt{puzzle-4x4} & \tt{13} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{24}} &{\tiny $\pm$\tt{3}} \\
+\bottomrule
+\end{tabularew}
+
+    }
+    }
+\end{wraptable}
+\textbf{A:}
+In our offline GCRL recipe (\Cref{alg:dgr}), we train \emph{two} goal-conditioned value functions:
+$f(\psi(\pl{s}), \phi(\pl{g}))$ for approximating temporal distances to learn a dual representation,
+and $V^\mathrm{GCRL}(\pl{s}, \phi(\pl{g}))$ for performing downstream GCRL.
+One might wonder whether we can directly extract a goal-conditioned policy from the former function $f$,
+without having a separate downstream GCRL loop.
+This is indeed possible (``Dual (Direct)'' in \Cref{table:direct}),
+but it generally leads to worse performance (except for \tt{antmaze-large}).
+The reason is that $f$ has a structured inner product parameterization
+and is relatively less expressive (although it is theoretically universal)
+to extract a goal-conditioned policy
+than the \emph{monolithic} $V^\mathrm{GCRL}(\pl{s}, \phi(\pl{g}))$ function, which has no structural constraints.
+In other words, the inner product parameterization is expressive enough to learn a good goal \emph{representation}
+but may not be enough to extract a \emph{policy}
+(\eg, in \tt{antmaze}, it is sufficient to focus on the $x$-$y$ position of the agent to learn a good goal representation,
+but we need to know the full joint angles to train a control policy),
+and thus we often benefit from a separate downstream GCRL algorithm with a different, more expressive value function.
+
+
+\cutsectionup
+\section{Closing Remarks}
+\cutsectiondown
+
+Originally, the main idea in this work was inspired by
+a common slogan in mathematics: ``an object is uniquely determined by its relations with every other object.''
+Building on top of this high-level idea,
+we introduced the concept of a dual goal representation,
+studied its theoretical properties (sufficiency and noise invariance),
+proposed a practical goal representation learning recipe,
+and demonstrated its empirical performance.
+We hope that the ideas introduced in this work
+inspire future research on state and goal representation learning
+in reinforcement learning and sequential decision making.
+
+\section*{Acknowledgment}
+This work was partly supported by the Korea Foundation for Advanced Studies (KFAS), ONR N00014-22-1-2773, and AFOSR FA9550-22-1-0273.
+This research used the Savio computational cluster resource provided by the Berkeley Research Computing program at UC Berkeley.
+
+%
+%
+
+
+
+
+
+\bibliography{iclr2026_conference}
+\bibliographystyle{iclr2026_conference}
+
+\clearpage
+
+\appendix
+
+
+\section{Proofs}
+\label{sec:proofs}
+
+
+\begin{theorem}[Sufficiency of Dual Goal Representations]
+Let $\gM=(\gS, \gA, p)$ be a CMP and $\phi^\vee$ be its dual goal representation function.
+Then, there exists a deterministic policy $\pi^\vee: \gS \times \gS^\vee \to \gA$ that takes a dual goal representation as input,
+such that its induced policy $\tilde \pi: \gS \times \gS \to \gA$ defined as
+$\tilde \pi(s, g) := \pi^\vee(s, \phi^\vee(g))$ satisfies $V^{\tilde \pi} (s, g) = V^*(s, g)$ for all $s, g \in \gS$.
+\end{theorem}
+
+\begin{proof}
+We define $\pi^\vee: \gS \times \gS^\vee \to \gA$ as
+\begin{align*}
+\pi^\vee(s, f) := \argmax_{a \in \gA} \E_{s' \sim p(\pl{s'} \mid s, a)}[\gamma^{f(s')}]
+\end{align*}
+for $s \in \gS$ and $f \in \gS^\vee$.
+Then, for any $s, g \in \gS$, we have
+\begin{align*}
+    \tilde \pi(s, g) &= \pi^\vee(s, \phi^\vee(g)) \\
+    &= \argmax_{a \in \gA} \E_{s' \sim p(\pl{s'} \mid s, a)}[\gamma^{\phi^\vee(g)(s')}] \\
+    &= \argmax_{a \in \gA} \E_{s' \sim p(\pl{s'} \mid s, a)}[V^*(s', g)] \\
+    &= \argmax_{a \in \gA} Q^*(s, a, g).
+\end{align*}
+Invoking the standard result in RL theory~\citep{rl_sutton2005}, we conclude that $V^{\tilde \pi}(s, g) = V^*(s, g)$.
+\end{proof}
+
+\begin{theorem}[Noise Invariance of Dual Goal Representations]
+Let $\gM=(\gS, \gZ, \gA, p, p^e, p^\ell)$ be a BCMP and $\phi^\vee$ be its dual goal representation function.
+Let $g_1, g_2 \in \gS$ be two goal observations from the same latent state; \ie, $p^\ell(g_1) = p^\ell(g_2)$.
+Then, they have the same dual goal representation; \ie, $\phi^\vee(g_1) = \phi^\vee(g_2)$.
+\end{theorem}
+
+\begin{proof}
+We need to show $\phi^\vee(g_1)(s) = \phi^\vee(g_2)(s)$ for all $s \in \gS$.
+This follows from
+\begin{align*}
+    \phi^\vee(g_1)(s) &= \log_\gamma V^*(s, g_1) \\
+    &= \log_\gamma (\max_\pi V^\pi(s, g_1)) \\
+    &= \log_\gamma \left(\max_\pi \E_{\tau \sim p^\pi(\pl{\tau} \mid \pl{s_0} = s)}\left[\sum_{t=0}^\infty \gamma^t r^\ell(s_t, g_1)\right] \right) \\
+    &= \log_\gamma \left(\max_\pi \E_{\tau \sim p^\pi(\pl{\tau} \mid \pl{s_0} = s)}\left[\sum_{t=0}^\infty \gamma^t \mathbb{I}(p^\ell(s_t) = p^\ell(g_1))\right] \right) \\
+    &= \log_\gamma \left(\max_\pi \E_{\tau \sim p^\pi(\pl{\tau} \mid \pl{s_0} = s)}\left[\sum_{t=0}^\infty \gamma^t \mathbb{I}(p^\ell(s_t) = p^\ell(g_2))\right] \right) \\
+    &= \log_\gamma \left(\max_\pi \E_{\tau \sim p^\pi(\pl{\tau} \mid \pl{s_0} = s)}\left[\sum_{t=0}^\infty \gamma^t r^\ell(s_t, g_2)\right] \right) \\
+    &= \log_\gamma (\max_\pi V^\pi(s, g_2)) \\
+    &= \log_\gamma V^*(s, g_2) \\
+    &= \phi^\vee(g_2)(s),
+\end{align*}
+where the $\max$ is taken over the set of all non-goal-conditioned policies $\pi: \gS \to \Delta(\gA)$.
+\end{proof}
+
+\section{Algorithms}
+
+%
+In this section, we describe the representation learning methods and downstream offline GCRL algorithms considered in our experiments.
+
+\subsection{Prior Representation Learning Algorithms}
+%
+%
+
+\textbf{VIB~\citep{recon_shah2021, hiql_park2023}.}
+VIB trains a goal representation based on information bottleneck~\citep{ib_tishby1999, vib_alemi2017}.
+In our experiments, a VIB representation $\phi$ is trained directly via the value loss in the downstream GCRL algorithm (except for GCFBC, where we train it via the actor loss).
+Specifically, we model a downstream value function as $V^\mathrm{GCRL}(\pl{s}, \phi(\pl{g}))$,
+where $\phi(g)$ denotes a stochastic latent vector sampled from $\gN(\mu(g), \Sigma(g))$
+with $\mu$ being a mean network and $\Sigma$ being a diagonal covariance network.
+We train this stochastic latent-parameterized value network using the downstream GCRL loss
+with an additional KL loss term,
+$\beta D_\mathrm{KL} \infdivx*{\gN(\mu(g), \Sigma(g))}{\gN(0, I)}$,
+to regularize the posterior distribution with a coefficient $\beta$.
+In our experiments, we find that low $\beta$ values generally work the best,
+and select the best $\beta$ from $\{0.001, 0.003\}$ for each environment and downstream GCRL algorithm.
+
+
+\textbf{TRA~\citep{tra_myers2025}.}
+TRA trains a goal representation via a symmetric InfoNCE variant~\citep{tra_myers2025} of the CRL loss~\citep{crl_eysenbach2022}.
+We then use this representation to parameterize a downstream GCRL policy and downstream value functions.
+In the original paper, the TRA representation also gets gradients from the downstream GCRL loss.
+We perform a hyperparameter sweep on this choice, and enable gradient flow for GCFBC and disable it for GCIVL and CRL.
+%
+%
+
+\textbf{BYOL-$\bm{\gamma}$~\citep{byolgamma_lawson2025}.}
+BYOL-$\gamma$ trains a representation based on a temporal self-predictive representation loss~\citep{spr_schwarzer2021}.
+We use the bidirectional variant in the paper,
+and use the representation $\phi$ to parameterize goals in downstream policy and value networks.
+We do not use $\phi$ to represent states to enable apples-to-apples comparisons with other goal representation learning algorithms.
+As in TRA, we also perform a hyperparameter sweep on gradient flows from the downstream GCRL loss to the representation,
+and enable it for GCFBC and disable it for GCIVL and CRL.
+
+\textbf{VIP~\citep{vip_ma2023}.}
+VIP trains a representation via a metric embedding loss~\citep{dualrl_sikchi2024}.
+Specifically, it parameterizes the value function as $V(s, g) = -\|\phi(s) - \phi(g)\|_2$,
+and trains $\phi$ with a dual RL loss function~\citep{gofar_ma2022, vip_ma2023, dualrl_sikchi2024}.
+As with other methods, we use $\phi$ to represent (only) goals in downstream policy and value networks.
+
+
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+%
+%
+%
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+
+
+%
+%
+
+%
+%
+%
+
+%
+%
+%
+
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+%
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+%
+
+%
+
+%
+%
+%
+%
+
+%
+%
+
+\subsection{Downstream Offline GCRL Algorithms}
+In our experiments, we consider three downstream offline goal-conditioned algorithms:
+GCIVL, and CRL, and GCFBC.
+For GCIVL and CRL,
+we use the original implementations of OGBench~\citep{ogbench_park2025},
+and for GCFBC, we use the implementation by \citet{sharsa_park2025}.
+We refer to these works for the full descriptions of these algorithms.
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+
+%
+%
+%
+%
+%
+
+
+%
+%
+%
+%
+%
+%
+%
+%
+%
+
+%
+%
+%
+%
+%
+
+%
+
+
+\section{Additional Results}
+\label{sec:add_results}
+
+
+
+We provide results on state-based tasks with different downstream GCRL algorithms (CRL and GCFBC) in \Cref{table:state_crl,table:state_gcfbc}.
+
+\begin{table}[t!]
+\caption{
+\footnotesize
+\textbf{Results on state-based tasks with CRL as the downstream algorithm.}
+}
+\label{table:state_crl}
+\centering
+\scalebox{0.9}
+{
+
+\setlength{\myboxwidth}{2.7pt}
+
+\begin{tabularew}{l*{6}{>{\spew{.5}{+1}}r@{\,}l}}
+\toprule
+\multicolumn{1}{l}{\tt{Environment}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{Orig} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{VIB} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{VIP} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{TRA} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{BYOL-$\gamma$} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{\color{myblue}Dual} \makebox[\myboxwidth]{}} \\
+\midrule
+\tt{pointmaze-medium-navigate-v0} & \tt{30} &{\tiny $\pm$\tt{7}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{55}} &{\tiny $\pm$\tt{7}} & \tt{32} &{\tiny $\pm$\tt{2}} & \tt{49} &{\tiny $\pm$\tt{6}} & \tt{33} &{\tiny $\pm$\tt{1}} \\
+\tt{pointmaze-large-navigate-v0} & \tt{46} &{\tiny $\pm$\tt{12}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{50}} &{\tiny $\pm$\tt{5}} & \tt{35} &{\tiny $\pm$\tt{10}} & \tt{38} &{\tiny $\pm$\tt{11}} & \tt{39} &{\tiny $\pm$\tt{12}} \\
+\tt{antmaze-medium-navigate-v0} & \tt{\color{myblue}{95}} &{\tiny $\pm$\tt{2}} & \tt{10} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{94}} &{\tiny $\pm$\tt{0}} & \tt{77} &{\tiny $\pm$\tt{5}} & \tt{87} &{\tiny $\pm$\tt{3}} & \tt{\color{myblue}{93}} &{\tiny $\pm$\tt{3}} \\
+\tt{antmaze-large-navigate-v0} & \tt{\color{myblue}{87}} &{\tiny $\pm$\tt{7}} & \tt{8} &{\tiny $\pm$\tt{1}} & \tt{64} &{\tiny $\pm$\tt{10}} & \tt{71} &{\tiny $\pm$\tt{14}} & \tt{77} &{\tiny $\pm$\tt{4}} & \tt{\color{myblue}{87}} &{\tiny $\pm$\tt{2}} \\
+\tt{antmaze-giant-navigate-v0} & \tt{11} &{\tiny $\pm$\tt{3}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{4} &{\tiny $\pm$\tt{1}} & \tt{3} &{\tiny $\pm$\tt{1}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{21}} &{\tiny $\pm$\tt{4}} \\
+\tt{humanoidmaze-medium-navigate-v0} & \tt{\color{myblue}{57}} &{\tiny $\pm$\tt{2}} & \tt{3} &{\tiny $\pm$\tt{1}} & \tt{43} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{57}} &{\tiny $\pm$\tt{1}} & \tt{46} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{57}} &{\tiny $\pm$\tt{4}} \\
+\tt{humanoidmaze-large-navigate-v0} & \tt{20} &{\tiny $\pm$\tt{5}} & \tt{1} &{\tiny $\pm$\tt{0}} & \tt{13} &{\tiny $\pm$\tt{3}} & \tt{\color{myblue}{31}} &{\tiny $\pm$\tt{3}} & \tt{22} &{\tiny $\pm$\tt{7}} & \tt{18} &{\tiny $\pm$\tt{4}} \\
+\tt{antsoccer-arena-navigate-v0} & \tt{\color{myblue}{22}} &{\tiny $\pm$\tt{2}} & \tt{1} &{\tiny $\pm$\tt{0}} & \tt{3} &{\tiny $\pm$\tt{1}} & \tt{7} &{\tiny $\pm$\tt{2}} & \tt{9} &{\tiny $\pm$\tt{2}} & \tt{19} &{\tiny $\pm$\tt{3}} \\
+\tt{cube-single-play-v0} & \tt{20} &{\tiny $\pm$\tt{3}} & \tt{7} &{\tiny $\pm$\tt{2}} & \tt{42} &{\tiny $\pm$\tt{6}} & \tt{17} &{\tiny $\pm$\tt{3}} & \tt{29} &{\tiny $\pm$\tt{5}} & \tt{\color{myblue}{60}} &{\tiny $\pm$\tt{1}} \\
+\tt{cube-double-play-v0} & \tt{11} &{\tiny $\pm$\tt{3}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{4} &{\tiny $\pm$\tt{1}} & \tt{5} &{\tiny $\pm$\tt{2}} & \tt{3} &{\tiny $\pm$\tt{2}} & \tt{\color{myblue}{24}} &{\tiny $\pm$\tt{5}} \\
+\tt{scene-play-v0} & \tt{20} &{\tiny $\pm$\tt{2}} & \tt{4} &{\tiny $\pm$\tt{1}} & \tt{18} &{\tiny $\pm$\tt{3}} & \tt{22} &{\tiny $\pm$\tt{5}} & \tt{33} &{\tiny $\pm$\tt{2}} & \tt{\color{myblue}{44}} &{\tiny $\pm$\tt{5}} \\
+\tt{puzzle-3x3-play-v0} & \tt{4} &{\tiny $\pm$\tt{1}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{3} &{\tiny $\pm$\tt{1}} & \tt{3} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{6}} &{\tiny $\pm$\tt{1}} \\
+\tt{puzzle-4x4-play-v0} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{2}} &{\tiny $\pm$\tt{0}} \\
+\midrule
+\tt{Average} & \tt{33} &{\tiny $\pm$\tt{2}} & \tt{3} &{\tiny $\pm$\tt{0}} & \tt{30} &{\tiny $\pm$\tt{1}} & \tt{28} &{\tiny $\pm$\tt{1}} & \tt{30} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{39}} &{\tiny $\pm$\tt{1}} \\
+\bottomrule
+\end{tabularew}
+
+
+}
+\end{table}
+
+
+\begin{table}[t!]
+\caption{
+\footnotesize
+\textbf{Results on state-based tasks with GCFBC as the downstream algorithm.}
+}
+\label{table:state_gcfbc}
+\centering
+\scalebox{0.9}
+{
+
+\setlength{\myboxwidth}{2.7pt}
+
+\begin{tabularew}{l*{6}{>{\spew{.5}{+1}}r@{\,}l}}
+\toprule
+\multicolumn{1}{l}{\tt{Environment}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{Orig} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{VIB} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{VIP} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{TRA} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{BYOL-$\gamma$} \makebox[\myboxwidth]{}} & \multicolumn{2}{c}{\makebox[\myboxwidth]{} \tt{\color{myblue}Dual} \makebox[\myboxwidth]{}} \\
+\midrule
+\tt{pointmaze-medium-navigate-v0} & \tt{63} &{\tiny $\pm$\tt{3}} & \tt{48} &{\tiny $\pm$\tt{4}} & \tt{53} &{\tiny $\pm$\tt{8}} & \tt{\color{myblue}{77}} &{\tiny $\pm$\tt{4}} & \tt{\color{myblue}{77}} &{\tiny $\pm$\tt{2}} & \tt{73} &{\tiny $\pm$\tt{3}} \\
+\tt{pointmaze-large-navigate-v0} & \tt{70} &{\tiny $\pm$\tt{4}} & \tt{69} &{\tiny $\pm$\tt{2}} & \tt{65} &{\tiny $\pm$\tt{5}} & \tt{\color{myblue}{76}} &{\tiny $\pm$\tt{4}} & \tt{\color{myblue}{75}} &{\tiny $\pm$\tt{4}} & \tt{66} &{\tiny $\pm$\tt{7}} \\
+\tt{antmaze-medium-navigate-v0} & \tt{44} &{\tiny $\pm$\tt{1}} & \tt{10} &{\tiny $\pm$\tt{2}} & \tt{18} &{\tiny $\pm$\tt{2}} & \tt{\color{myblue}{56}} &{\tiny $\pm$\tt{5}} & \tt{51} &{\tiny $\pm$\tt{4}} & \tt{53} &{\tiny $\pm$\tt{9}} \\
+\tt{antmaze-large-navigate-v0} & \tt{20} &{\tiny $\pm$\tt{1}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{7} &{\tiny $\pm$\tt{3}} & \tt{29} &{\tiny $\pm$\tt{2}} & \tt{29} &{\tiny $\pm$\tt{4}} & \tt{\color{myblue}{31}} &{\tiny $\pm$\tt{5}} \\
+\tt{antmaze-giant-navigate-v0} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{0}} &{\tiny $\pm$\tt{0}} \\
+\tt{humanoidmaze-medium-navigate-v0} & \tt{8} &{\tiny $\pm$\tt{1}} & \tt{3} &{\tiny $\pm$\tt{1}} & \tt{5} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{9}} &{\tiny $\pm$\tt{1}} & \tt{8} &{\tiny $\pm$\tt{2}} & \tt{8} &{\tiny $\pm$\tt{2}} \\
+\tt{humanoidmaze-large-navigate-v0} & \tt{\color{myblue}{1}} &{\tiny $\pm$\tt{1}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{1}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{1}} &{\tiny $\pm$\tt{0}} & \tt{\color{myblue}{1}} &{\tiny $\pm$\tt{0}} \\
+\tt{antsoccer-arena-navigate-v0} & \tt{16} &{\tiny $\pm$\tt{1}} & \tt{3} &{\tiny $\pm$\tt{1}} & \tt{3} &{\tiny $\pm$\tt{0}} & \tt{11} &{\tiny $\pm$\tt{1}} & \tt{12} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{17}} &{\tiny $\pm$\tt{2}} \\
+\tt{cube-single-play-v0} & \tt{12} &{\tiny $\pm$\tt{1}} & \tt{10} &{\tiny $\pm$\tt{2}} & \tt{14} &{\tiny $\pm$\tt{1}} & \tt{12} &{\tiny $\pm$\tt{3}} & \tt{10} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{20}} &{\tiny $\pm$\tt{2}} \\
+\tt{cube-double-play-v0} & \tt{3} &{\tiny $\pm$\tt{0}} & \tt{3} &{\tiny $\pm$\tt{1}} & \tt{3} &{\tiny $\pm$\tt{1}} & \tt{3} &{\tiny $\pm$\tt{1}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{5}} &{\tiny $\pm$\tt{1}} \\
+\tt{scene-play-v0} & \tt{19} &{\tiny $\pm$\tt{4}} & \tt{6} &{\tiny $\pm$\tt{1}} & \tt{18} &{\tiny $\pm$\tt{4}} & \tt{20} &{\tiny $\pm$\tt{5}} & \tt{13} &{\tiny $\pm$\tt{2}} & \tt{\color{myblue}{27}} &{\tiny $\pm$\tt{3}} \\
+\tt{puzzle-3x3-play-v0} & \tt{\color{myblue}{3}} &{\tiny $\pm$\tt{1}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{2} &{\tiny $\pm$\tt{0}} & \tt{2} &{\tiny $\pm$\tt{0}} & \tt{2} &{\tiny $\pm$\tt{1}} & \tt{2} &{\tiny $\pm$\tt{0}} \\
+\tt{puzzle-4x4-play-v0} & \tt{\color{myblue}{2}} &{\tiny $\pm$\tt{1}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{1} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} & \tt{0} &{\tiny $\pm$\tt{0}} \\
+\midrule
+\tt{Average} & \tt{20} &{\tiny $\pm$\tt{0}} & \tt{12} &{\tiny $\pm$\tt{0}} & \tt{14} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{23}} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{22}} &{\tiny $\pm$\tt{1}} & \tt{\color{myblue}{23}} &{\tiny $\pm$\tt{1}} \\
+\bottomrule
+\end{tabularew}
+
+
+}
+\end{table}
+
+\clearpage
+
+\begin{figure}[t!]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/envs.pdf}
+    \caption{
+    \footnotesize
+    \textbf{OGBench environments.}
+    OGBench provides diverse state- and pixel-based goal-conditioned tasks
+    across robotic navigation and manipulation.
+    This figure is taken from \citet{fql_park2025}.
+    }
+    \label{fig:envs}
+\end{figure}
+
+\section{Implementation Details}
+\label{sec:impl_details}
+Our method and baselines are implemented on top of the default implementations given in the OGBench codebase \citep{ogbench_park2025}.
+We provide the code and instructions at \url{https://github.com/deepindermann/dual-goal-representations}.
+
+\subsection{Discrete Puzzle Experiments}
+\label{sec:impl_pure}
+
+\textbf{Tasks and datasets.}
+In \Cref{sec:exp_pure}, we employ a discrete ``Lights Out'' puzzle environment.
+In this environment,
+a state consists of $n_x \times n_y$ binary button states (\ie, $\gS = \{0, 1\}^{n_xn_y}$),
+and an action corresponds to pressing a button (\ie, $\gA = \{0, 1, \ldots, n_xn_y-1\}$).
+Whenever the agent presses a button, the colors of that button and the adjacent ones get toggled.
+We employ two different puzzle sizes, $(n_x, n_y) = (4, 5)$ and $(4, 6)$,
+which we call \tt{puzzle-4x5} and \tt{puzzle-4x6}, respectively.
+At test time, we evaluate the agent with the five pre-defined state-goal configurations used in OGBench~\citep{ogbench_park2025},
+where the maximum evaluation episode length is set to $n_xn_y$.
+For datasets, we employ $40000$ length-$25$ trajectories generated by a uniform random policy.
+
+\textbf{Training.}
+To compute dual representations, we first randomly sample $64$ states,
+run breadth-first search to compute temporal distances,
+and use the list of temporal distances from the $64$ states as a dual representation.
+For downstream goal-conditioned DQN, we use the $-1$-$0$ sparse reward function (see \Cref{sec:impl_ogb}).
+We train agents for $1$M steps, and evaluate the $\argmax$ DQN policies
+using $15$ episodes for each of the five evaluation tasks.
+
+\textbf{Hyperparameters.}
+We provide the list of hyperparameters in \Cref{table:hyp_pure}.
+In the table, $(p^\gD_\mathrm{cur}, p^\gD_\mathrm{geom}, p^\gD_\mathrm{traj}, p^\gD_\mathrm{rand})$
+denotes the hindsight relabeling ratio tuple defined in \citet{ogbench_park2025}.
+
+\subsection{OGBench Experiments}
+\label{sec:impl_ogb}
+
+\textbf{Visual encoders.}
+In pixel-based tasks, there are several design choices regarding visual encoders
+(\eg, whether to share state or goal encoders across different networks, how to flow gradients, etc.).
+We test various variants regarding these choices and find the following configuration to work best.
+For the original representation baseline,
+we use separate ``early fusion'' (see \Cref{sec:exp_pixel}) encoders for each of the policy and value network.
+For other goal representation methods,
+we share a single state visual encoder and a single goal visual encoder for all networks (with ``late fusion''),
+and they get gradients from all downstream GCRL losses as well as the representation learning loss.
+However, we do not propagate downstream GCRL gradients through the representation function $\phi$
+(except for VIB, which is designed to be trained with the downstream value loss).
+We refer to our code for the full details about gradient flows.
+
+\textbf{Metrics.}
+Following OGBench~\citep{ogbench_park2025},
+we report the average performance over the last three evaluation epochs in tables
+(\ie, over $800$K, $900$K, and $1$M gradient steps for state-based tasks and over $300$K, $400$K, and $500$K steps for pixel-based tasks).
+We use $50$ (state-based) or $15$ (pixel-based) episodes for each of the five evaluation goals.
+
+\textbf{Hyperparameters.}
+We provide the list of hyperparameters in \Cref{table:hyp_ogb}.
+Following OGBench~\citep{ogbench_park2025}, we apply layer normalization~\citep{ln_ba2016} to all networks
+except for the policies in GCIVL and CRL.
+%
+%
+
+\begin{table}[h!]
+\caption{
+\footnotesize
+\textbf{Hyperparameters for discrete puzzle experiments.}
+}
+\vspace{-5pt}
+\label{table:hyp_pure}
+\begin{center}
+\scalebox{0.75}
+{
+\begin{tabular}{ll}
+    \toprule
+    \textbf{Hyperparameter} & \textbf{Value} \\
+    \midrule
+    Gradient steps & $10^6$ (state-based) \\
+    Optimizer & Adam~\citep{adam_kingma2015} \\
+    Learning rate & $0.0001$ \\
+    Batch size & $1024$ \\
+    MLP size & $[1024, 1024, 1024, 1024]$ \\
+    Nonlinearity & GELU~\citep{gelu_hendrycks2016} \\
+    Layer normalization & True \\
+    Target network update rate & $0.005$ \\
+    Discount factor $\gamma$ & $0.95$ \\
+    DQN $(p^\gD_\mathrm{cur}, p^\gD_\mathrm{geom}, p^\gD_\mathrm{traj}, p^\gD_\mathrm{rand})$ ratio & $(0.2, 0, 0.5, 0.3)$ \\
+    \bottomrule
+\end{tabular}
+}
+\end{center}
+\end{table}
+
+\begin{table}[h!]
+\caption{
+\footnotesize
+\textbf{Hyperparameters for OGBench experiments.}
+}
+\vspace{-5pt}
+\label{table:hyp_ogb}
+\begin{center}
+\scalebox{0.75}
+{
+\begin{tabular}{ll}
+    \toprule
+    \textbf{Hyperparameter} & \textbf{Value} \\
+    \midrule
+    Gradient steps & $10^6$ (state-based), $5 \times 10^5$ (pixel-based) \\
+    Optimizer & Adam~\citep{adam_kingma2015} \\
+    Learning rate & $0.0003$ \\
+    Batch size & $1024$ (state-based), $256$ (pixel-based) \\
+    MLP size & $[512, 512, 512]$ \\
+    Nonlinearity & GELU~\citep{gelu_hendrycks2016} \\
+    Target network update rate & $0.005$ \\
+    Discount factor $\gamma$ & $0.99$ (default), $0.995$ (\tt{humanoidmaze}, \tt{antmaze-giant}) \\
+    Goal representation dimensionality $N$ & $256$ (default), $64$ (\tt{pointmaze}) \\
+    Dual representation's GCIQL expectile $\kappa$ & $0.7$ (default), $0.9$ (\tt{navigate}) \\
+    VIB $\beta$ & $0.001$ (default), $0.003$ (\tt{pointmaze}, \tt{antmaze-large}) \\
+    Representation $(p^\gD_\mathrm{cur}, p^\gD_\mathrm{geom}, p^\gD_\mathrm{traj}, p^\gD_\mathrm{rand})$ ratio (Dual) & $(0.2, 0.5, 0, 0.3)$ \\
+    Representation $(p^\gD_\mathrm{cur}, p^\gD_\mathrm{geom}, p^\gD_\mathrm{traj}, p^\gD_\mathrm{rand})$ ratio (TRA, BYOL-$\gamma$) & $(0, 1, 0, 0)$ \\
+    Downstream GCIVL expectile & $0.9$ \\
+    Downstream policy extraction hyperparameters & Identical to OGBench~\citep{ogbench_park2025} \\
+    Downstream policy $(p^\gD_\mathrm{cur}, p^\gD_\mathrm{geom}, p^\gD_\mathrm{traj}, p^\gD_\mathrm{rand})$ ratio  & $(0, 0, 1, 0)$ \\
+    Downstream value $(p^\gD_\mathrm{cur}, p^\gD_\mathrm{geom}, p^\gD_\mathrm{traj}, p^\gD_\mathrm{rand})$ ratio (default) & $(0.2, 0.5, 0, 0.3)$ \\
+    Downstream value $(p^\gD_\mathrm{cur}, p^\gD_\mathrm{geom}, p^\gD_\mathrm{traj}, p^\gD_\mathrm{rand})$ ratio (CRL) & $(0, 1, 0, 0)$ \\
+    Goal noise for \Cref{fig:noisy} & $0.3$ (\tt{antmaze}), $0.2$ (\tt{cube}, \tt{scene}) \\
+    Visual encoder & \tt{impala\_small}~\citep{impala_espeholt2018, ogbench_park2025} \\
+    Image augmentation probability & $0.5$ \\
+    \bottomrule
+\end{tabular}
+}
+\end{center}
+\end{table}
+
+
+\end{document}

@@ -42,7 +42,7 @@ class GCIVLDualAgent(flax.struct.PyTreeNode):
 
         # Rep critic loss.
         next_v = self.network.select('rep_value')(batch['next_observations'], batch['value_goals'])
-        q = batch['rewards'] + self.config['discount'] * batch['masks'] * next_v
+        q = batch['rewards'] + selqf.config['discount'] * batch['masks'] * next_v
         q1, q2 = self.network.select('rep_critic')(
             batch['observations'], batch['value_goals'], batch['actions'], params=grad_params
         )
@@ -205,7 +205,7 @@ class GCIVLDualAgent(flax.struct.PyTreeNode):
             ex_actions: Example batch of actions. In discrete-action MDPs, this should contain the maximum action value.
             config: Configuration dictionary.
         """
-        rng = jax.random.PRNGKey(seed)
+        rng = jax.random.key(seed)
         rng, init_rng = jax.random.split(rng, 2)
 
         ex_goals = jnp.zeros(shape=(1, config['goalrep_dim']))

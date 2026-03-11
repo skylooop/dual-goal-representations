@@ -88,17 +88,10 @@ Every experiment must run on a separate branch.
 - Never reuse an experiment branch for a different idea.
 - Keep successful branches; discard failed/non-improving branches.
 
-## Runtime budget policy
-
-Each experiment must satisfy following:
-
-1. Stop as soon as the FOUR evaluations are completed.
-
 Implementation rule:
 
-- Launch training in background.
+- Launch training in background, so even after i have closed terminal the training must continue.
 - Poll `eval.csv` in the corresponding results folder.
-- As soon as `eval.csv` has at least four data rows, terminate training gracefully.
 
 Notes:
 
@@ -113,10 +106,11 @@ uv run python main.py \
   --agent=agents/crl/dual.py \
   --env_name=antmaze-large-navigate-v0 \
   --wandb_mode=offline
-  --eval_interval=50000
+  --eval_interval=100000
   --eval_episodes=30
+  --wandb_mode=online
 ```
-Ensure that eval_interval=50000 and log_interval=20000, eval_episodes=30
+Ensure that eval_interval=100000 and log_interval=30000, eval_episodes=30. The run must be active until whole million iterations are performed of training. 
 
 You may pass additional CLI flags, but do not edit the train/eval hyperparameter definitions in `main.py`.
 

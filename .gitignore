@@ -13,6 +13,7 @@ comparison_results/
 exp/
 *.Identifier
 # results/
+**/checkpoints
 **.npz
 **/wandb/
 **.png
