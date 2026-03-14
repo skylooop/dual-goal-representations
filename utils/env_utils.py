@@ -87,9 +87,19 @@ def make_env_and_datasets(dataset_name, frame_stack=None):
         A tuple of the environment, training dataset, and validation dataset.
     """
     # Use compact dataset to save memory.
-    env, train_dataset, val_dataset = ogbench.make_env_and_datasets(dataset_name, compact_dataset=True)
+    env, train_dataset, val_dataset = ogbench.make_env_and_datasets(dataset_name, compact_dataset=True, add_info=True)
     train_dataset = Dataset.create(**train_dataset)
-    val_dataset = Dataset.create(**val_dataset)
+    val_dataset = Dataset.create(**val_dataset) 
+
+    eps = 1e-5
+    train_dataset = train_dataset.copy(
+        add_or_replace=dict(
+            actions=np.clip(train_dataset["actions"], -1 + eps, 1 - eps)
+        )
+    )
+    val_dataset = val_dataset.copy(
+        add_or_replace=dict(actions=np.clip(val_dataset["actions"], -1 + eps, 1 - eps))
+    )
 
     if frame_stack is not None:
         env = FrameStackWrapper(env, frame_stack)
@@ -98,3 +108,91 @@ def make_env_and_datasets(dataset_name, frame_stack=None):
 
     return env, train_dataset, val_dataset
 
+def relabel_dataset(env_name, env, dataset):
+    """Relabel the dataset with rewards and masks based on the fixed task of the environment.
+
+    Args:
+        env_name: Name of the environment.
+        env: Environment.
+        dataset: Dataset dictionary.
+
+    Returns:
+        The relabeled dataset.
+    
+    """
+    if 'maze' in env_name or 'soccer' in env_name:
+        # Locomotion environments.
+        qpos_xy_start_idx = 0
+        qpos_ball_start_idx = 15
+        goal_xy = env.unwrapped.cur_goal_xy
+        goal_tol = env.unwrapped._goal_tol
+
+        # Compute successes.
+        if 'maze' in env_name:
+            dists = np.linalg.norm(dataset['qpos'][:, qpos_xy_start_idx : qpos_xy_start_idx + 2] - goal_xy, axis=-1)
+        else:
+            dists = np.linalg.norm(dataset['qpos'][:, qpos_ball_start_idx : qpos_ball_start_idx + 2] - goal_xy, axis=-1)
+        successes = (dists <= goal_tol).astype(np.float32)
+
+        rewards = successes  # 1.0 if s == g else 0.0
+        masks = 1.0 - successes
+    elif 'cube' in env_name or 'scene' in env_name or 'puzzle' in env_name:
+        # Manipulation environments.
+        qpos_obj_start_idx = 14
+        qpos_cube_length = 7
+
+        if 'cube' in env_name:
+            num_cubes = env.unwrapped._num_cubes
+            target_cube_xyzs = env.unwrapped._data.mocap_pos.copy()
+
+            # Compute successes.
+            cube_xyzs_list = []
+            for i in range(num_cubes):
+                cube_xyzs_list.append(
+                    dataset['qpos'][
+                        :, qpos_obj_start_idx + i * qpos_cube_length : qpos_obj_start_idx + i * qpos_cube_length + 3
+                    ]
+                )
+            cube_xyzs = np.stack(cube_xyzs_list, axis=1)
+            successes = np.linalg.norm(target_cube_xyzs - cube_xyzs, axis=-1) <= 0.04
+        elif 'scene' in env_name:
+            num_cubes = env.unwrapped._num_cubes
+            num_buttons = env.unwrapped._num_buttons
+            qpos_drawer_idx = qpos_obj_start_idx + num_cubes * qpos_cube_length + num_buttons
+            qpos_window_idx = qpos_drawer_idx + 1
+            target_cube_xyzs = env.unwrapped._data.mocap_pos.copy()
+            target_button_states = env.unwrapped._target_button_states.copy()
+            target_drawer_pos = env.unwrapped._target_drawer_pos
+            target_window_pos = env.unwrapped._target_window_pos
+
+            # Compute successes.
+            cube_xyzs_list = []
+            for i in range(num_cubes):
+                cube_xyzs_list.append(
+                    dataset['qpos'][
+                        :, qpos_obj_start_idx + i * qpos_cube_length : qpos_obj_start_idx + i * qpos_cube_length + 3
+                    ]
+                )
+            cube_xyzs = np.stack(cube_xyzs_list, axis=1)
+            cube_successes = np.linalg.norm(target_cube_xyzs - cube_xyzs, axis=-1) <= 0.04
+            button_successes = dataset['button_states'] == target_button_states
+            drawer_success = np.abs(dataset['qpos'][:, qpos_drawer_idx] - target_drawer_pos) <= 0.04
+            window_success = np.abs(dataset['qpos'][:, qpos_window_idx] - target_window_pos) <= 0.04
+            successes = np.concatenate(
+                [cube_successes, button_successes, drawer_success[:, None], window_success[:, None]], axis=-1
+            )
+        elif 'puzzle' in env_name:
+            num_buttons = env.unwrapped._num_buttons
+            target_button_states = env.unwrapped._target_button_states.copy()
+
+            # Compute successes.
+            successes = dataset['button_states'] == target_button_states
+
+        rewards = successes.sum(axis=-1)  # 1.0 if s == g else 0.0
+        masks = 1.0 - np.all(successes, axis=-1)
+    new_fields = dict(dataset)
+    new_fields['rewards'] = rewards.astype(np.float32)
+    new_fields['masks'] = masks.astype(np.float32)
+    new_dataset = Dataset.create(freeze=False, **new_fields)
+
+    return new_dataset

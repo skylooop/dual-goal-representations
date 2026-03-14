@@ -271,6 +271,36 @@ class GCDataset:
         batch['masks'] = 1.0 - successes
         batch['rewards'] = successes - (1.0 if self.config['gc_negative'] else 0.0)
 
+        final_state_idxs = self.terminal_locs[np.searchsorted(self.terminal_locs, idxs)]
+
+        if self.config.get("agent_name") in ["trl"]:
+            assert (idxs != final_state_idxs).all() and (idxs != value_goal_idxs).all()
+
+            value_middle_goal_idxs = np.random.randint(idxs, value_goal_idxs)
+
+            batch["value_offsets"] = value_goal_idxs - idxs
+            batch["value_midpoint_offsets"] = value_middle_goal_idxs - idxs
+            batch["value_midpoint_observations"] = self.get_observations(
+                value_middle_goal_idxs
+            )
+            batch["value_midpoint_actions"] = self.dataset["actions"][
+                value_middle_goal_idxs
+            ]
+            batch["next_actions"] = self.dataset["actions"][idxs + 1]
+
+            if "oracle_reps" in self.dataset:
+                batch["value_midpoint_goals"] = self.dataset["oracle_reps"][
+                    value_middle_goal_idxs
+                ]
+                batch["value_cur_goals"] = self.dataset["oracle_reps"][idxs]
+                batch["value_next_goals"] = self.dataset["oracle_reps"][idxs + 1]
+            else:
+                batch["value_midpoint_goals"] = self.get_observations(
+                    value_middle_goal_idxs
+                )
+                batch["value_cur_goals"] = self.get_observations(idxs)
+                batch["value_next_goals"] = self.get_observations(idxs + 1)
+        
         if self.config['p_aug'] is not None and not evaluation:
             if np.random.rand() < self.config['p_aug']:
                 self.augment(batch, ['observations', 'next_observations', 'value_goals', 'actor_goals'])

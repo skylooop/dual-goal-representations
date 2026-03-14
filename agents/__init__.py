@@ -5,7 +5,6 @@ from agents.crl.tra import CRLTRAAgent
 from agents.crl.vib import CRLVIBAgent
 from agents.crl.vip import CRLVIPAgent
 from agents.daf_pde.dual import DAFPDEDualAgent
-from agents.hiql.eikonal_hiql import EikonalHIQLAgent
 from agents.gcfbc.original import GCFBCAgent
 from agents.gcfbc.byol import GCFBCBYOLAgent
 from agents.gcfbc.dual import GCFBCDualAgent
@@ -23,6 +22,7 @@ from agents.gcivl.state.byol import GCIVLBYOLAgent
 from agents.gcivl.state.tra import GCIVLTRAAgent
 from agents.gcivl.state.vib import GCIVLVIBAgent
 from agents.gcivl.state.vip import GCIVLVIPAgent
+from agents.hilp.original import HILPAgent
 
 agents = dict(
     crl=CRLAgent,
@@ -54,6 +54,6 @@ agents = dict(
     gcivl_vip_vis=GCIVLVisualVIPAgent,
     crl_vip=CRLVIPAgent,
     gcfbc_vip=GCFBCVIPAgent,
-    # Eikonal HIQL agents.
-    eik_hiql=EikonalHIQLAgent,
+    # Hilp agents
+    hilp=HILPAgent
 )

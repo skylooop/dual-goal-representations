@@ -1,4 +1,0 @@
-branch	commit	overall_success	mean_task_success	status	description
-autoresearch/mar11-baseline	8df7383	0.24	0.24	keep	GCIVL baseline from results/gcivl/antmaze-large-navigate-v0_gcivl_sd000/eval.csv
-autoresearch/mar11-baseline	8df7383	0.32	0.32	keep	GCIVL+Dual baseline from results/gcivl_dual/antmaze-large-navigate-v0_gcivl_dual_sd000/eval.csv
-autoresearch/mar11-exp001-dual-td-adv	8df7383	NA	NA	crash	Run with --agent.agent_name=gcivl_dual_tdadv failed: KeyError in agents registry

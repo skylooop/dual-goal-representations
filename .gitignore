@@ -12,7 +12,7 @@ eval_results/
 comparison_results/
 exp/
 *.Identifier
-# results/
+results/
 **/checkpoints
 **.npz
 **/wandb/

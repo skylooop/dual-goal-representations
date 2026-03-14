@@ -39,6 +39,7 @@ def evaluate(
     env,
     task_id=None,
     config=None,
+    inferred_latent=None,
     num_eval_episodes=50,
     num_video_episodes=0,
     video_frame_skip=3,
@@ -92,7 +93,10 @@ def evaluate(
         step = 0
         render = []
         while not done:
-            action, key = actor_fn(observations=observation, goals=goal, temperature=eval_temperature, key=key)
+            if inferred_latent is not None:
+                action, key = actor_fn(observations=observation, latents=inferred_latent, temperature=eval_temperature)
+            else:
+                action, key = actor_fn(observations=observation, goals=goal, temperature=eval_temperature, key=key)
             action = np.array(action)
             if not config.get('discrete'):
                 if eval_gaussian is not None:

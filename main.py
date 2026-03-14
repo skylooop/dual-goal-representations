@@ -28,7 +28,7 @@ from ml_collections import config_flags
 import threading, queue
 
 from utils.datasets import Dataset, GCDataset, HGCDataset, VIPDataset
-from utils.env_utils import make_env_and_datasets
+from utils.env_utils import make_env_and_datasets, relabel_dataset
 from utils.evaluation import evaluate
 from utils.flax_utils import restore_agent, save_agent
 from utils.log_utils import (
@@ -69,7 +69,7 @@ flags.DEFINE_integer("eval_episodes", 30, "Number of episodes for each task.")
 flags.DEFINE_float("eval_temperature", 0.0, "Actor temperature for evaluation.")
 flags.DEFINE_float("eval_gaussian", None, "Action Gaussian noise for evaluation.")
 flags.DEFINE_float("eval_goal_gaussian", None, "Goal Gaussian noise for evaluation.")
-flags.DEFINE_integer("video_episodes", 0, "Number of video episodes for each task.")
+flags.DEFINE_integer("video_episodes", 1, "Number of video episodes for each task.")
 flags.DEFINE_integer("video_frame_skip", 3, "Frame skip for videos.")
 flags.DEFINE_integer("eval_on_cpu", 0, "Whether to evaluate on CPU.")
 
@@ -120,9 +120,11 @@ def main():
         Dataset.create(norm=config["norm"], **train_dataset), config
     )
     if val_dataset is not None:
+        zero_shot_dataset_dict = val_dataset
         val_dataset = dataset_class(
             Dataset.create(norm=config["norm"], **val_dataset), config
         )
+
     # Need to pass into evaluation functions
     diff = train_dataset.get_diff()
 
@@ -181,7 +183,7 @@ def main():
         colour="green",
         leave=True,
         position=0,
-        disable=True,
+        disable=False,
     ):
         # Update agent.
         batch = prefetch_queue.get()
@@ -200,7 +202,7 @@ def main():
             train_logger.log(train_metrics, step=i)
 
         # Evaluate agent.
-        if i >= 1 and i % FLAGS.eval_interval == 0:
+        if i == 0 or i % FLAGS.eval_interval == 0:
             if FLAGS.eval_on_cpu:
                 eval_agent = jax.device_put(agent, device=jax.devices("cpu")[0])
             else:
@@ -224,14 +226,32 @@ def main():
                 dynamic_ncols=True,
                 colour="yellow",
                 position=1,
-                disable=True,
+                disable=False,
             ):
+                if config['agent_name'] in ['hilp']:
+                    env.reset(options=dict(task_id=task_id))
+                    zero_shot_dataset = relabel_dataset(
+                        FLAGS.env_name, 
+                        env, 
+                        zero_shot_dataset_dict, 
+                    )
+                    zero_shot_dataset = dataset_class(Dataset.create(**zero_shot_dataset), config)
+                    assert zero_shot_dataset.size >= config['num_zero_shot_samples']
+                    zero_shot_batch = zero_shot_dataset.sample(config['num_zero_shot_samples'], 
+                                                           idxs=np.arange(config['num_zero_shot_samples']),
+                                                           evaluation=True)
+                    inferred_latent = agent.infer_latent(zero_shot_batch)
+                    inferred_latent = np.asarray(inferred_latent)
+                else:
+                    inferred_latent = None
+
                 task_name = task_infos[task_id - 1]["task_name"]
                 eval_info, trajs, cur_renders = evaluate(
                     agent=eval_agent,
                     env=env,
                     task_id=task_id,
                     config=config,
+                    inferred_latent=inferred_latent,
                     num_eval_episodes=FLAGS.eval_episodes,
                     num_video_episodes=FLAGS.video_episodes,
                     video_frame_skip=FLAGS.video_frame_skip,
