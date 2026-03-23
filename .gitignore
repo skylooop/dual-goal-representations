@@ -12,7 +12,8 @@ eval_results/
 comparison_results/
 exp/
 *.Identifier
-results/
+/home/m_bobrin/dual-goal-representations/results/crl/antmaze-large-navigate-v0_crl_sd000
+# results/
 **/checkpoints
 **.npz
 **/wandb/

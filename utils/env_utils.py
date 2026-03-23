@@ -76,7 +76,7 @@ class FrameStackWrapper(gymnasium.Wrapper):
         return self.get_observation(), reward, terminated, truncated, info
 
 
-def make_env_and_datasets(dataset_name, frame_stack=None):
+def make_env_and_datasets(dataset_name, frame_stack=None, eps=1e-5):
     """Make environment and datasets.
 
     Args:
@@ -88,18 +88,10 @@ def make_env_and_datasets(dataset_name, frame_stack=None):
     """
     # Use compact dataset to save memory.
     env, train_dataset, val_dataset = ogbench.make_env_and_datasets(dataset_name, compact_dataset=True, add_info=True)
+    train_dataset['actions'] = np.clip(train_dataset["actions"], -1 + eps, 1 - eps)
+    val_dataset['actions'] = np.clip(val_dataset["actions"], -1 + eps, 1 - eps)
     train_dataset = Dataset.create(**train_dataset)
     val_dataset = Dataset.create(**val_dataset) 
-
-    eps = 1e-5
-    train_dataset = train_dataset.copy(
-        add_or_replace=dict(
-            actions=np.clip(train_dataset["actions"], -1 + eps, 1 - eps)
-        )
-    )
-    val_dataset = val_dataset.copy(
-        add_or_replace=dict(actions=np.clip(val_dataset["actions"], -1 + eps, 1 - eps))
-    )
 
     if frame_stack is not None:
         env = FrameStackWrapper(env, frame_stack)

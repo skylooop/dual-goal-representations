@@ -66,10 +66,10 @@ def evaluate(
     Returns:
         A tuple containing the statistics, trajectories, and rendered videos.
     """
-    key = jax.random.PRNGKey(np.random.randint(0, 2**32))
+    key = jax.random.key(np.random.randint(0, 2**32))
 
     @jax.jit
-    def actor_fn(*args, key=jax.random.PRNGKey(np.random.randint(0, 2**32)), **kwargs):
+    def actor_fn(*args, key=jax.random.key(np.random.randint(0, 2**32)), **kwargs):
         key, subkey = jax.random.split(key)
         return agent.sample_actions(*args, **kwargs, seed=subkey), key
 

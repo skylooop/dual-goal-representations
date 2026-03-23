@@ -314,13 +314,17 @@ def _encode_goals(agent: Any, goals: jnp.ndarray) -> jnp.ndarray:
 
 
 def _compute_learned_value_grid(
-    agent: Any, states_flat: jnp.ndarray, goals_flat: jnp.ndarray
-) -> jnp.ndarray:
-    """Compute V(s,g) on a batch; return scalar value (min of ensemble)."""
+    agent, states_flat, goals_flat
+):
+    """Compute V(s,g) on a batch; return scalar value (min of ensemble if ensemble, else raw)."""
     value_fn = _get_value_module(agent)
     goal_reps = _encode_goals(agent, goals_flat)
-    v1, v2 = value_fn(states_flat, goal_reps)
-    return jnp.minimum(v1, v2)
+    v = value_fn(states_flat, goal_reps)
+    # Ensemble value returns shape (2, B); non-ensemble returns (B,)
+    if v.ndim == 2 and v.shape[0] == 2:
+        return jnp.minimum(v[0], v[1])
+    return v
+
 
 
 def _compute_learned_value_grad_grid(
@@ -524,7 +528,7 @@ def plot_antmaze_learned_and_analytic(
             chunk_n, num_samples
         ).mean(axis=1)
 
-    v_learned = -v_learned_flat.reshape(ny, nx)
+    v_learned = -v_learned_flat.reshape(ny, nx) # since gc_negative=True, -1 on each step
     v_learned[obstacle_mask] = np.nanmax(v_learned[~obstacle_mask])
     v_learned_lines = np.ma.masked_where(obstacle_mask, v_learned)
 
