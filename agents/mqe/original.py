@@ -335,9 +335,6 @@ def get_config():
             alpha=0.1,  # Temperature in AWR or BC coefficient in DDPG+BC.
             t=5.0,  # Clipping threshold for the backup LINEX loss. You can increase this if you want more accurate regression (although this might cause numerical instability).
             diag_backup=0.5,  # Weighting of backups on diagonal (i.e., for s,g ~ p(s,g)) vs. off-diagonal (i.e., for s,g ~ p(s)p(g)). We recommend this to be 0.2-0.4 for locomotion tasks, 0.5-1 for manipulation tasks.
-
-            
-
             # Dataset hyperparameters.
             oraclerep=False,
             dataset_class='GCDataset',  # Dataset class name.
