@@ -1,154 +1,165 @@
 # AGENTS.md
 
-Guidance for autonomous coding agents working in this repository.
+Guidance for agentic coding tools operating in this repository.
 
-## Scope and Ground Truth
+## Project Scope
 
-- This project is a Python/JAX research codebase for offline goal-conditioned RL.
-- Primary entry points are `main.py`, `eval_pretrained.py`, and `rliable_agents.py`.
-- Dependency management uses `uv` (`pyproject.toml` + `uv.lock`).
-- There are currently no committed `tests/` files in the repository.
-- No Cursor rules were found in `.cursor/rules/` or `.cursorrules`.
-- No Copilot rules were found in `.github/copilot-instructions.md`.
+- This is a Python/JAX research codebase for offline goal-conditioned RL.
+- Main entry points are `main.py`, `eval_pretrained.py`, and `rliable_agents.py`.
+- Dependency management uses `uv` with `pyproject.toml` and `uv.lock`.
+- Python target is `>=3.11`.
+- Core packages include JAX, Flax, Optax, ml-collections, Orbax, and W&B.
+- Experiment launch commands live in `hyperparameters.sh`.
 
-## Environment Setup Commands
+## Rules Files
 
-- Install/sync deps: `uv sync`
-- Run with project env: `uv run <command>`
-- Python version target: `>=3.11` (see `pyproject.toml`).
+- Repository-local Cursor rules: none found in `.cursor/rules/`.
+- Repository-local `.cursorrules`: none found.
+- Repository-local Copilot rules: none found in `.github/copilot-instructions.md`.
+- If any of those files are added later, treat them as higher-priority repository guidance.
+
+## Repository Layout
+
+- `agents/`: algorithm implementations and agent registries.
+- `agents/__init__.py`: central registry mapping agent names to classes.
+- `agents/*/*.py`: agent variants typically expose a class plus `get_config()`.
+- `utils/`: datasets, networks, env creation, eval helpers, logging, checkpoint helpers.
+- `main.py`: offline training loop, logging, checkpointing, and evaluation.
+- `eval_pretrained.py`: checkpoint evaluation and RLiable-style reporting.
+- `hyperparameters.sh`: canonical paper and baseline launch commands.
+- `results/`, `eval_results/`, and similar output folders may contain generated artifacts; do not edit them unless asked.
+
+## Environment Setup
+
+- Sync dependencies: `uv sync`
+- Run commands in the project environment: `uv run <command>`
+- Optional shell activation: `source .venv/bin/activate`
 - Quick import smoke test: `uv run python -c "import agents, utils; print('ok')"`
 
-## Build Commands
+## Build And Validation Commands
 
-- There is no package build pipeline (no wheel/sdist/Makefile configured).
+- There is no package build pipeline, wheel, or Makefile.
 - Treat these as build-equivalent checks:
-- Bytecode compile all Python: `uv run python -m compileall .`
-- CLI health check (train script flags): `uv run python main.py --help`
-- CLI health check (eval script flags): `uv run python eval_pretrained.py --help`
+- Bytecode compilation: `uv run python -m compileall .`
+- Training CLI health check: `uv run python main.py --help`
+- Eval CLI health check: `uv run python eval_pretrained.py --help`
+- Agent registry import smoke test: `uv run python -c "from agents import agents; print(sorted(agents)[:3])"`
 
-## Lint and Format Commands
+## Lint And Format Commands
 
-- Ruff cache is present, so Ruff is the expected linter.
-- Lint all files: `uv run ruff check .`
-- Auto-fix lint issues: `uv run ruff check . --fix`
 - Format all files: `uv run ruff format .`
 - Check formatting only: `uv run ruff format . --check`
+- Lint all files: `uv run ruff check .`
+- Auto-fix lint issues when safe: `uv run ruff check . --fix`
+- Preferred local validation after edits: `uv run ruff format . && uv run ruff check .`
 
 ## Test Commands
 
-- There is no formal test suite checked in right now.
-- Default full test command (once tests exist): `uv run pytest`
+- There is currently no committed `tests/` directory or `pytest.ini`.
+- If tests are added, use `pytest` through `uv run`.
+- Run all tests: `uv run pytest`
 - Run a single test file: `uv run pytest path/to/test_file.py`
-- Run a single test case: `uv run pytest path/to/test_file.py::test_name`
+- Run a single test function: `uv run pytest path/to/test_file.py::test_name`
 - Run a single test method: `uv run pytest path/to/test_file.py::TestClass::test_name`
-- Filter tests by keyword: `uv run pytest -k "keyword"`
+- Run tests by keyword: `uv run pytest -k "keyword"`
+- When adding a new test, verify at least one targeted test invocation before finishing.
 
-## Practical Validation Commands (use today)
+## Practical Smoke Checks
 
-- Because tests are absent, validate changes with lightweight smoke runs.
-- Minimal train dry-run (very short):
+- Because formal tests are absent, always run at least one lightweight smoke command relevant to the change.
+- Minimal train dry-run:
 - `uv run python main.py --env_name=pointmaze-medium-navigate-v0 --train_steps=5 --log_interval=5 --eval_interval=5 --save_interval=1000000 --eval_episodes=1 --video_episodes=0 --wandb_mode=offline`
-- Minimal eval dry-run (requires checkpoint):
+- Minimal eval dry-run with an existing checkpoint:
 - `uv run python eval_pretrained.py --env_name=pointmaze-medium-navigate-v0 --agent=agents/crl/dual.py --restore_path=<checkpoints_dir> --restore_epoch=<step> --eval_episodes=2 --num_bootstraps=100`
 - RLiable comparison utility:
 - `uv run python rliable_agents.py --results_dirs <dir1> <dir2> --labels "A" "B" --output_dir comparison_results/<name>`
 
-## Full experiment run
-- Take optimal hyperparameters and launch arguments from `hyperparameters.sh` file for specific baseline.
-- If you are running/implementing not a baseline method, choose best optimal hyperparameters that are suitable.
+## Experiment Commands
 
-## Repository Structure to Preserve
+- For baseline or paper reproduction runs, start from `hyperparameters.sh` rather than inventing new defaults.
+- For new methods, choose defaults that are consistent with nearby agents and environment families.
+- Avoid launching full training runs unless explicitly requested; default to smoke-scale checks.
 
-- `agents/`: algorithm implementations and config (`get_config`) per agent.
-- `utils/`: datasets, env creation, networks, evaluation, logging, checkpoint helpers.
-- `main.py`: training orchestration, eval loop, checkpointing, W&B logging.
-- `eval_pretrained.py`: checkpoint evaluation + RLiable metrics/plots.
-- `hyperparameters.sh`: canonical experiment command matrix.
-
-## Code Style Guidelines
+## Coding Conventions
 
 ### Imports
 
-- Order imports in three groups: stdlib, third-party, local project.
+- Use three import groups: standard library, third-party, local project.
 - Separate groups with one blank line.
-- Avoid duplicate imports (e.g., same module imported twice).
+- Prefer one import per module or a short grouped import line when readable.
+- Avoid duplicate imports and mixed ordering.
 - Prefer explicit imports over wildcard imports.
 
 ### Formatting
 
-- Use `ruff format` style as canonical formatter.
-- Keep lines readable; prefer multi-line call formatting over dense one-liners.
-- Use trailing commas in multi-line literals/calls to reduce noisy diffs.
-- Keep comments focused on non-obvious math or JAX-specific behavior.
+- Use `ruff format` as the canonical formatter.
+- Keep lines readable; split long calls and literals across lines.
+- Use trailing commas in multi-line literals and function calls.
+- Keep docstrings concise and focused on behavior or shape assumptions.
+- Add comments only for non-obvious math, JAX behavior, or tricky dataset semantics.
 
-### Types and Signatures
+### Types And Signatures
 
-- Follow existing pattern: lightweight typing, `Any` where Flax/JAX pytrees are complex.
-- Add type hints for new public functions when practical.
-- Preserve existing public method signatures (`create`, `update`, `sample_actions`, `get_config`).
-- Any new agent implementation must follow template from `agents` implementations.
+- Match the repository's lightweight typing style.
+- Use `Any` when Flax/JAX pytrees make precise typing noisy.
+- Add type hints to new public helpers where practical.
+- Preserve established public method names and signatures such as `create`, `update`, `sample_actions`, and `get_config`.
 - Keep `get_config()` returning `ml_collections.ConfigDict` with explicit keys.
 
-### Naming Conventions
+### Naming
 
-- Filenames/modules: `snake_case.py`.
-- Classes: `PascalCase` with `Agent` suffix for agents.
-- Functions/variables/config keys: `snake_case`.
-- Constants/flags: UPPER_CASE only for true constants; `absl.flags` use lower snake case.
-- Log keys use slash namespaces like `actor/loss`, `value/v_mean`.
+- Filenames and modules: `snake_case.py`
+- Classes: `PascalCase`
+- Agent classes should use the `Agent` suffix.
+- Functions, variables, and config keys: `snake_case`
+- True constants: `UPPER_CASE`
+- `absl.flags` names should remain lower snake case.
+- Log keys should keep slash namespaces such as `actor/loss` or `value/v_mean`.
 
-### JAX/Flax Conventions
+### JAX And Flax Patterns
 
-- Keep hot paths JIT-friendly (`@jax.jit` on `update`, `total_loss`, action sampling).
-- Avoid Python-side mutation inside jitted code except established patterns.
-- Keep RNG handling explicit (`new_rng, rng = jax.random.split(...)`).
-- Use `jax.lax.stop_gradient` intentionally and document why when added.
-- Prefer vectorized ops (`vmap`, `einsum`) over Python loops in model math.
+- Keep hot paths JIT-friendly.
+- Use `@jax.jit` on performance-critical update and loss functions when consistent with neighboring code.
+- Keep RNG handling explicit via `jax.random.split`.
+- Prefer vectorized operations like `vmap`, `einsum`, and array ops over Python loops in model math.
+- Use `jax.lax.stop_gradient` only when intentional; document why if the reason is not obvious.
+- Avoid Python-side mutation inside jitted regions except for established train-state patterns.
 
-### Config and Hyperparameters
+### Configuration And Agents
 
-- Add new hyperparameters in `get_config()` with sensible defaults and comments.
-- Keep dataset sampling probabilities normalized (sum to `1.0`).
-- Respect existing config compatibility keys even if currently unused.
-- When adding agent variants, register them in `agents/__init__.py`.
+- New agent variants should follow the existing structure in `agents/crl`, `agents/gcfbc`, or `agents/gcivl`.
+- Register any new agent in `agents/__init__.py`.
+- Add new hyperparameters to `get_config()` with sensible defaults.
+- Preserve compatibility keys in configs unless a coordinated cleanup is requested.
+- Keep dataset goal-sampling probabilities normalized to sum to `1.0`.
 
-### Error Handling and Validation
+### Data, Evaluation, And Reproducibility
 
-- Fail fast on invalid configuration with `ValueError`/`assert` (consistent with codebase).
-- Validate shape assumptions at boundaries (dataset batch, action dims, goal reps).
-- Keep user-facing CLI interruptions graceful (`KeyboardInterrupt` handling pattern).
-- Prefer clear exception messages including offending key/path/value.
+- Preserve seed plumbing across Python `random`, NumPy, and JAX.
+- Do not silently change save directory structure, experiment naming, or checkpoint conventions.
+- Keep evaluation outputs compatible with downstream RLiable analysis.
+- Preserve stable metric names when possible so previous result-processing scripts continue to work.
 
-### Logging, Checkpointing, and Reproducibility
+### Error Handling And Validation
 
-- Keep training/eval metrics both in W&B and CSV/JSON outputs where applicable.
-- Use existing Orbax helpers in `utils/flax_utils.py` for save/restore.
-- Preserve seed plumbing (`random`, `numpy`, JAX RNG).
-- Do not silently change default experiment naming or save directory patterns.
+- Fail fast on invalid configuration or unsupported modes.
+- Prefer `ValueError` or clear assertions for impossible states and shape assumptions.
+- Include the offending key, path, shape, or value in error messages when practical.
+- Keep CLI interruption behavior graceful when touching long-running scripts.
+- Validate boundary assumptions at dataset, action-space, and representation interfaces.
 
-### Evaluation and Metrics
+## Change Strategy For Agents
 
-- Maintain RLiable-compatible outputs (`score_matrix.npy`, aggregate JSON, plots).
-- Keep per-task metric naming stable for downstream comparison scripts.
-- Use small bootstrap counts only for quick smoke checks; keep large defaults for final runs.
+- Prefer minimal, targeted diffs over broad refactors.
+- Preserve existing research behavior unless the task explicitly changes algorithm logic.
+- If you modify algorithmic behavior, note the rationale in your final summary.
+- Do not rewrite generated artifacts, checkpoints, W&B files, or plot outputs unless asked.
+- If you add tests, also mention the exact single-test command that should be used to rerun them.
 
-## Change Management for Agents
+## Recommended Completion Checklist
 
-- Prefer minimal, targeted diffs; avoid broad refactors unless requested.
-- If touching algorithm logic, include a short rationale in PR/commit notes.
-- Run lint/format and at least one smoke command after edits.
-- If adding tests, also document exact single-test invocation in this file.
-- Never commit large generated artifacts (plots, checkpoints, W&B run files) unless asked.
-
-## Known Gaps / Caveats
-
-- The repository currently has no first-class unit tests; rely on smoke validation.
-- Some scripts are compute-heavy by default; always downscale steps/episodes for CI-like checks.
-
-## Quick Agent Checklist
-- Ensure you have loaded uv venv as `source .venv/bin/activate`
-- Sync deps: `uv sync`
-- Format + lint: `uv run ruff format . && uv run ruff check .`
-- Run smoke command relevant to your change.
-- For test additions, verify one targeted case with `uv run pytest path::test_name`.
-- Summarize any assumptions when full training/eval was not executed.
+- Sync dependencies if needed: `uv sync`
+- Format and lint: `uv run ruff format . && uv run ruff check .`
+- Run one relevant smoke command for the touched path.
+- If tests exist for the touched code, run at least one targeted `pytest` invocation.
+- State any assumptions if full training or full evaluation was not run.

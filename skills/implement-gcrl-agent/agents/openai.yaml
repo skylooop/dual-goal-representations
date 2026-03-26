@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implement GCRL Agent"
+  short_description: "Implement JAX/Flax GCRL agents for this repo"
+  default_prompt: "Use $implement-gcrl-agent to add a new goal-conditioned RL agent that matches this repository architecture."
