@@ -230,6 +230,7 @@ class OTAAgent(flax.struct.PyTreeNode):
         ex_observations,
         ex_actions,
         config,
+        ex_goals=None,
     ):
         """Create a new agent.
 
@@ -239,7 +240,7 @@ class OTAAgent(flax.struct.PyTreeNode):
             ex_actions: Example batch of actions. In discrete-action MDPs, this should contain the maximum action value.
             config: Configuration dictionary.
         """
-        rng = jax.random.PRNGKey(seed)
+        rng = jax.random.key(seed)
         rng, init_rng = jax.random.split(rng, 2)
 
         ex_goals = ex_observations
@@ -380,6 +381,8 @@ def get_config():
             discrete=False,  # Whether the action space is discrete.
             encoder=ml_collections.config_dict.placeholder(str),  # Visual encoder name (None, 'impala_small', etc.).
             # Dataset hyperparameters.
+            norm=False,
+            oraclerep=False,
             dataset_class='HGCDataset',  # Dataset class name.
             value_p_curgoal=0.2,  # Probability of using the current state as the value goal.
             value_p_trajgoal=0.5,  # Probability of using a future state in the same trajectory as the value goal.

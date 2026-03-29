@@ -25,6 +25,7 @@ from agents.hilp.original import HILPAgent
 from agents.mqe.original import MQEAgent
 from agents.tmd.original import TMDAgent
 from agents.qrl.original import QRLAgent
+from agents.ota.original import OTAAgent
 
 agents = dict(
     crl=CRLAgent,
@@ -63,4 +64,6 @@ agents = dict(
     tmd=TMDAgent,
     # QRL agents
     qrl=QRLAgent,
+    # OTA agents
+    ota=OTAAgent,
 )
