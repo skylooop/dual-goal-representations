@@ -21,6 +21,7 @@ from agents.gcivl.state.byol import GCIVLBYOLAgent
 from agents.gcivl.state.tra import GCIVLTRAAgent
 from agents.gcivl.state.vib import GCIVLVIBAgent
 from agents.gcivl.state.vip import GCIVLVIPAgent
+from agents.daf.original import DAFAgent
 from agents.hilp.original import HILPAgent
 from agents.mqe.original import MQEAgent
 from agents.tmd.original import TMDAgent
@@ -56,6 +57,8 @@ agents = dict(
     gcivl_vip_vis=GCIVLVisualVIPAgent,
     crl_vip=CRLVIPAgent,
     gcfbc_vip=GCFBCVIPAgent,
+    # DAF agents
+    daf=DAFAgent,
     # Hilp agents
     hilp=HILPAgent,
     # MQE agents
