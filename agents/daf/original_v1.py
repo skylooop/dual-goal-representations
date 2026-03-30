@@ -171,6 +171,12 @@ class DAFActorFreeAgent(flax.struct.PyTreeNode):
         No actor network is involved — the "policy" is the argmax of the
         advantage field, computed on-the-fly.
         """
+        # Ensure batch dimension exists (eval passes unbatched 1D inputs).
+        unbatched = observations.ndim == 1
+        if unbatched:
+            observations = observations[None]
+            goals = goals[None]
+
         goal_reps = self.network.select("rep_value")(goals)  # psi(g): (B, D)
         B = observations.shape[0]
         action_dim = self.config["action_dim"]
@@ -215,7 +221,11 @@ class DAFActorFreeAgent(flax.struct.PyTreeNode):
         scores = scores.reshape(M, B)
         refined = refined.reshape(M, B, action_dim)
         best_idx = jnp.argmax(scores, axis=0)  # (B,)
-        return refined[best_idx, jnp.arange(B)]
+        result = refined[best_idx, jnp.arange(B)]
+
+        if unbatched:
+            result = result[0]
+        return result
 
     @classmethod
     def create(
