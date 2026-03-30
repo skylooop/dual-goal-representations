@@ -21,11 +21,6 @@ class DAFAgent(flax.struct.PyTreeNode):
     representation space. An action-effect head u(s,a) approximates
     E[gamma*phi(s') - phi(s) | s,a], yielding the dual advantage
     A_hat = u(s,a)^T psi(g) / sqrt(d) for AWR policy improvement.
-
-    Key structural advantage over baselines: the bilinear factorization means a
-    single u(s,a) produces correct advantages for ALL goals simultaneously via
-    dot products. The multi-goal actor loss exploits this by training the actor
-    against K goals per (s,a) at marginal cost (K dot products vs K value-fn evals).
     """
 
     rng: Any
@@ -86,14 +81,15 @@ class DAFAgent(flax.struct.PyTreeNode):
     def action_effect_loss(self, batch, grad_params):
         """MSE regression of u(s,a) against gamma*phi(s') - phi(s).
 
-        Uses target_rep_value (EMA copy) for stable regression targets,
-        preventing the moving-target problem from rep_value updates.
+        phi is the state encoder from the bilinear rep_value. Targets are
+        stop-gradiented so this loss does not backprop into the representation.
         """
-        # Extract state representations from the *target* rep_value for stability.
-        _, phi_s, _ = self.network.select("target_rep_value")(
+        # Extract state representations via info mode; rep_goals is a dummy
+        # second arg since phi does not depend on the goal input.
+        _, phi_s, _ = self.network.select("rep_value")(
             batch["observations"], batch["rep_goals"], info=True
         )
-        _, phi_s_next, _ = self.network.select("target_rep_value")(
+        _, phi_s_next, _ = self.network.select("rep_value")(
             batch["next_observations"], batch["rep_goals"], info=True
         )
         target = jax.lax.stop_gradient(
@@ -115,85 +111,57 @@ class DAFAgent(flax.struct.PyTreeNode):
         }
 
     def actor_loss(self, batch, grad_params, rng=None):
-        """Multi-goal AWR actor loss using the dual advantage.
+        """AWR actor loss using the dual advantage.
 
-        Exploits the bilinear factorization: a single u(s,a) is computed once,
-        then dotted with psi(g_k) for K different goals. This gives K times
-        more actor supervision per batch at marginal cost (K dot products),
-        which baselines cannot do without K full value-function evaluations.
+        Advantage is u(s,a)^T psi(g) / sqrt(d), which equals the discrete
+        analogue of Dayan's A = dx . nabla_x V in representation space.
         """
-        batch_size = batch["observations"].shape[0]
-        num_goals = self.config["num_actor_goals"]
+        goal_reps = self.network.select("rep_value")(batch["actor_goals"])
 
-        # Compute action-effect vector once per (s, a).
         if self.config["advantage_mode"] == "oracle":
+            # Upper-bound ablation: use true next-state from the batch.
             _, phi_s, _ = self.network.select("rep_value")(
                 batch["observations"], batch["actor_goals"], info=True
             )
             _, phi_s_next, _ = self.network.select("rep_value")(
                 batch["next_observations"], batch["actor_goals"], info=True
             )
-            u = self.config["discount"] * phi_s_next - phi_s  # (B, D)
+            delta = self.config["discount"] * phi_s_next - phi_s
+            # Dual advantage: delta^T psi(g) / sqrt(d).
+            adv = (delta * goal_reps).sum(axis=-1) / jnp.sqrt(
+                goal_reps.shape[-1]
+            )
         else:
+            # Learned action-effect head.
             sa_input = jnp.concatenate(
                 [batch["observations"], batch["actions"]], axis=-1
             )
-            u = self.network.select("action_effect")(sa_input)  # (B, D)
+            u = self.network.select("action_effect")(sa_input)
+            # Dual advantage: u^T psi(g) / sqrt(d).
+            adv = (u * goal_reps).sum(axis=-1) / jnp.sqrt(
+                goal_reps.shape[-1]
+            )
 
-        # Build K goal sets: slot 0 = trajectory actor_goals, rest = random.
-        rng, goal_rng = jax.random.split(rng)
-        random_keys = jax.random.split(goal_rng, num_goals - 1)
-        random_indices = jax.vmap(
-            lambda key: jax.random.randint(key, (batch_size,), 0, batch_size)
-        )(random_keys)  # (K-1, B)
-        random_goals = batch["observations"][random_indices]  # (K-1, B, obs_dim)
-        multi_goals = jnp.concatenate(
-            [batch["actor_goals"][None], random_goals], axis=0
-        )  # (K, B, obs_dim)
-
-        # Encode all K*B goals in one forward pass.
-        goals_flat = multi_goals.reshape(-1, multi_goals.shape[-1])
-        goal_reps_flat = self.network.select("rep_value")(goals_flat)
-        goal_reps = goal_reps_flat.reshape(num_goals, batch_size, -1)  # (K, B, D)
-        latent_dim = goal_reps.shape[-1]
-
-        # Dual advantage for all (s, a, g_k): u^T psi(g) / sqrt(d).
-        # u: (B, D), goal_reps: (K, B, D) -> adv: (K, B).
-        adv = jnp.einsum("bd,kbd->kb", u, goal_reps) / jnp.sqrt(latent_dim)
-
-        # Advantage normalization: calibrates raw inner-product scale.
-        if self.config["normalize_advantage"]:
-            adv = (adv - adv.mean()) / (adv.std() + 1e-6)
-
-        # Flatten to (K*B,) for vectorized AWR.
-        adv_flat = adv.reshape(-1)
-        exp_a = jnp.exp(adv_flat * self.config["alpha"])
+        exp_a = jnp.exp(adv * self.config["alpha"])
         exp_a = jnp.minimum(exp_a, 100.0)
 
-        # Actor forward pass for all K*B (observation, goal) pairs.
-        obs_repeated = jnp.tile(batch["observations"][None], (num_goals, 1, 1))
-        obs_flat = obs_repeated.reshape(-1, obs_repeated.shape[-1])
-        greps_flat = goal_reps.reshape(-1, latent_dim)
         dist = self.network.select("actor")(
-            obs_flat, greps_flat, params=grad_params
+            batch["observations"], goal_reps, params=grad_params
         )
-        actions_repeated = jnp.tile(
-            batch["actions"][None], (num_goals, 1, 1)
-        ).reshape(-1, batch["actions"].shape[-1])
-        log_prob = dist.log_prob(actions_repeated)
+        log_prob = dist.log_prob(batch["actions"])
 
         actor_loss = -(exp_a * log_prob).mean()
 
         actor_info = {
             "actor_loss": actor_loss,
-            "adv_mean": adv_flat.mean(),
-            "adv_std": adv_flat.std(),
+            "adv_mean": adv.mean(),
+            "adv_std": adv.std(),
             "bc_log_prob": log_prob.mean(),
         }
         if not self.config["discrete"]:
             actor_info.update(
                 {
-                    "mse": jnp.mean((dist.mode() - actions_repeated) ** 2),
+                    "mse": jnp.mean((dist.mode() - batch["actions"]) ** 2),
                     "std": jnp.mean(dist.scale_diag),
                 }
             )
@@ -241,7 +209,6 @@ class DAFAgent(flax.struct.PyTreeNode):
 
         new_network, info = self.network.apply_loss_fn(loss_fn=loss_fn)
         self.target_update(new_network, "rep_critic")
-        self.target_update(new_network, "rep_value")
 
         return self.replace(network=new_network, rng=new_rng), info
 
@@ -327,10 +294,6 @@ class DAFAgent(flax.struct.PyTreeNode):
         )
         network_info = dict(
             rep_value=(rep_value_def, (ex_observations, ex_observations)),
-            target_rep_value=(
-                copy.deepcopy(rep_value_def),
-                (ex_observations, ex_observations),
-            ),
             rep_critic=(
                 rep_critic_def,
                 (ex_observations, ex_observations, ex_actions),
@@ -352,7 +315,6 @@ class DAFAgent(flax.struct.PyTreeNode):
 
         params = network_params
         params["modules_target_rep_critic"] = params["modules_rep_critic"]
-        params["modules_target_rep_value"] = params["modules_rep_value"]
 
         return cls(rng, network=network, config=flax.core.FrozenDict(**config))
 
@@ -379,8 +341,6 @@ def get_config():
             rep_type="bilinear",  # Must be 'bilinear' for the gradient identity to hold.
             advantage_mode="dual",  # 'dual' (learned action-effect) or 'oracle' (true next-state).
             action_effect_weight=1.0,  # Weight for the action-effect regression loss.
-            num_actor_goals=4,  # Number of goals per (s,a) in the multi-goal actor loss.
-            normalize_advantage=True,  # Whether to normalize advantages before AWR exponentiation.
             # Dataset hyperparameters.
             dataset_class="GCDataset",  # Dataset class name.
             oraclerep=False,  # Always False; dummy option for compatibility.
