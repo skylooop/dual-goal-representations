@@ -27,6 +27,7 @@ from agents.mqe.original import MQEAgent
 from agents.tmd.original import TMDAgent
 from agents.qrl.original import QRLAgent
 from agents.ota.original import OTAAgent
+from agents.daf.original_v1 import DAFActorFreeAgent
 
 agents = dict(
     crl=CRLAgent,
@@ -69,4 +70,5 @@ agents = dict(
     qrl=QRLAgent,
     # OTA agents
     ota=OTAAgent,
+    daf_actor_free=DAFActorFreeAgent,
 )
