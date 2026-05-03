@@ -31,6 +31,7 @@ from agents.daf.laf import LAFGCRLAgent
 from agents.daf.original import AFUDAFAgent
 from agents.ota.original import OTAAgent
 from agents.coghp.coghp import CoGHPAgent
+from agents.pi_hiql.hiql_dual_daf import HIQLDualDAFAgent
 
 agents = dict(
     crl=CRLAgent,
@@ -79,4 +80,5 @@ agents = dict(
     laf_gcrl=LAFGCRLAgent,
     # CoGHP agents
     coghp=CoGHPAgent,
+    hiql_dual_daf=HIQLDualDAFAgent,
 )

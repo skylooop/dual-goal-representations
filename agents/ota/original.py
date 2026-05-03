@@ -452,9 +452,9 @@ def get_config():
             expectile=0.7,  # IQL expectile.
             low_alpha=3.0,  # Low-level AWR temperature.
             high_alpha=3.0,  # High-level AWR temperature.
-            subgoal_steps=25,  # Subgoal steps for actor.
+            subgoal_steps=20,  # Subgoal steps for actor.
             abstraction_factor=5,  # Abstraction factor for high-level value function.
-            rep_dim=10,  # Goal representation dimension.
+            rep_dim=256,  # Goal representation dimension.
             low_actor_rep_grad=False,  # Whether low-actor gradients flow to goal representation (use True for pixels).
             const_std=True,  # Whether to use constant standard deviation for the actors.
             discrete=False,  # Whether the action space is discrete.
