@@ -1,0 +1,50 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "COGHP",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "/home/m_bobrin/dual-goal-representations/main.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--agent",
+        "agents/coghp/coghp.py",
+        "--env_name",
+        "antmaze-large-navigate-v0",
+        "--train_steps",
+        "1000",
+        "--eval_interval",
+        "100",
+        "--eval_episodes",
+        "1",
+        "--seed",
+        "213131"
+      ]
+    },
+    {
+      "name": "OTA",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "/home/m_bobrin/dual-goal-representations/main.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--agent",
+        "agents/ota/original.py",
+        "--env_name",
+        "antmaze-medium-navigate-v0",
+        "--train_steps",
+        "1000",
+        "--eval_interval",
+        "100",
+        "--eval_episodes",
+        "1",
+        "--seed",
+        "13213"
+      ]
+    }
+  ]
+}

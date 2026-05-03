@@ -1,3 +1,4 @@
+from etils.enp.compat import norm
 import os
 
 import sys
@@ -27,7 +28,7 @@ from agents import agents
 from ml_collections import config_flags
 import threading, queue
 
-from utils.datasets import Dataset, GCDataset, HGCDataset, VIPDataset
+from utils.datasets import Dataset, GCDataset, HGCDataset, VIPDataset, MultiHGCDataset
 from utils.env_utils import make_env_and_datasets, relabel_dataset
 from utils.evaluation import evaluate
 from utils.flax_utils import restore_agent, save_agent
@@ -65,11 +66,11 @@ flags.DEFINE_integer("save_interval", 500_000, "Saving interval.")
 
 # EVAL HYPERS
 flags.DEFINE_integer("eval_tasks", None, "Number of tasks to evaluate (None for all).")
-flags.DEFINE_integer("eval_episodes", 30, "Number of episodes for each task.")
+flags.DEFINE_integer("eval_episodes", 50, "Number of episodes for each task.")
 flags.DEFINE_float("eval_temperature", 0.0, "Actor temperature for evaluation.")
 flags.DEFINE_float("eval_gaussian", None, "Action Gaussian noise for evaluation.")
 flags.DEFINE_float("eval_goal_gaussian", None, "Goal Gaussian noise for evaluation.")
-flags.DEFINE_integer("video_episodes", 1, "Number of video episodes for each task.")
+flags.DEFINE_integer("video_episodes", 0, "Number of video episodes for each task.")
 flags.DEFINE_integer("video_frame_skip", 3, "Frame skip for videos.")
 flags.DEFINE_integer("eval_on_cpu", 0, "Whether to evaluate on CPU.")
 
@@ -104,7 +105,7 @@ def main():
 
     config = FLAGS.agent
     env, train_dataset, val_dataset = make_env_and_datasets(
-        FLAGS.env_name, frame_stack=config["frame_stack"]
+        FLAGS.env_name, frame_stack=config["frame_stack"], normalize_data=config["norm"]
     )
     if "oraclerep" in FLAGS.env_name and config["oraclerep"] == False:
         raise ValueError(
@@ -115,15 +116,12 @@ def main():
         "GCDataset": GCDataset,
         "HGCDataset": HGCDataset,
         "VIPDataset": VIPDataset,
+        "MultiHGCDataset": MultiHGCDataset,
     }[config["dataset_class"]]
-    train_dataset = dataset_class(
-        Dataset.create(norm=config["norm"], **train_dataset), config
-    )
+    train_dataset = dataset_class(train_dataset, config)
     if val_dataset is not None:
         zero_shot_dataset_dict = val_dataset
-        val_dataset = dataset_class(
-            Dataset.create(norm=config["norm"], **val_dataset), config
-        )
+        val_dataset = dataset_class(val_dataset, config)
 
     # Need to pass into evaluation functions
     diff = train_dataset.get_diff()
@@ -228,18 +226,22 @@ def main():
                 position=1,
                 disable=False,
             ):
-                if config['agent_name'] in ['hilp']:
+                if config["agent_name"] in ["hilp"]:
                     env.reset(options=dict(task_id=task_id))
                     zero_shot_dataset = relabel_dataset(
-                        FLAGS.env_name, 
-                        env, 
-                        zero_shot_dataset_dict, 
+                        FLAGS.env_name,
+                        env,
+                        zero_shot_dataset_dict,
                     )
-                    zero_shot_dataset = dataset_class(Dataset.create(**zero_shot_dataset), config)
-                    assert zero_shot_dataset.size >= config['num_zero_shot_samples']
-                    zero_shot_batch = zero_shot_dataset.sample(config['num_zero_shot_samples'], 
-                                                           idxs=np.arange(config['num_zero_shot_samples']),
-                                                           evaluation=True)
+                    zero_shot_dataset = dataset_class(
+                        Dataset.create(**zero_shot_dataset), config
+                    )
+                    assert zero_shot_dataset.size >= config["num_zero_shot_samples"]
+                    zero_shot_batch = zero_shot_dataset.sample(
+                        config["num_zero_shot_samples"],
+                        idxs=np.arange(config["num_zero_shot_samples"]),
+                        evaluation=True,
+                    )
                     inferred_latent = agent.infer_latent(zero_shot_batch)
                     inferred_latent = np.asarray(inferred_latent)
                 else:

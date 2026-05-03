@@ -26,7 +26,7 @@ class TMDAgent(flax.struct.PyTreeNode):
 
     @jax.jit
     def mrn_distance(self, x, y):
-        K = self.config['components']
+        K = self.config["components"]
         assert x.shape[-1] % K == 0
 
         @jax.jit
@@ -41,13 +41,15 @@ class TMDAgent(flax.struct.PyTreeNode):
 
         x_split = jnp.stack(jnp.split(x, K, axis=-1), axis=-1)
         y_split = jnp.stack(jnp.split(y, K, axis=-1), axis=-1)
-        dists = jax.vmap(mrn_distance_component, in_axes=(-1, -1), out_axes=-1)(x_split, y_split)
+        dists = jax.vmap(mrn_distance_component, in_axes=(-1, -1), out_axes=-1)(
+            x_split, y_split
+        )
 
         return dists.mean(axis=-1)
 
     def iqe_distance(self, x, y):
-        k = self.config['components']
-        alpha_raw = self.network.select('alpha_raw')()
+        k = self.config["components"]
+        alpha_raw = self.network.select("alpha_raw")()
         alpha = jax.nn.sigmoid(alpha_raw)
         reshape = (x.shape[-1] // k, k)
         x = jnp.reshape(x, (*x.shape[:-1], *reshape))
@@ -57,30 +59,40 @@ class TMDAgent(flax.struct.PyTreeNode):
         xy = jnp.concatenate(jnp.broadcast_arrays(x, y), axis=-1)
         ixy = xy.argsort(axis=-1)
         sxy = jnp.take_along_axis(xy, ixy, axis=-1)
-        neg_inc_copies = jnp.take_along_axis(valid, ixy % D, axis=-1) * jnp.where(ixy < D, -1, 1)
+        neg_inc_copies = jnp.take_along_axis(valid, ixy % D, axis=-1) * jnp.where(
+            ixy < D, -1, 1
+        )
         neg_inp_copies = jnp.cumsum(neg_inc_copies, axis=-1)
         neg_f = (neg_inp_copies < 0) * (-1.0)
-        neg_incf = jnp.concatenate([neg_f[..., :1], neg_f[..., 1:] - neg_f[..., :-1]], axis=-1)
+        neg_incf = jnp.concatenate(
+            [neg_f[..., :1], neg_f[..., 1:] - neg_f[..., :-1]], axis=-1
+        )
         components = (sxy * neg_incf).sum(-1)
-        result = alpha * components.mean(axis=-1) + (1 - alpha) * components.max(axis=-1)
+        result = alpha * components.mean(axis=-1) + (1 - alpha) * components.max(
+            axis=-1
+        )
         return result
 
     @jax.jit
     def distance(self, x, y):
         x, y = jnp.broadcast_arrays(x, y)
-        if self.config['use_iqe']:
+        if self.config["use_iqe"]:
             return self.iqe_distance(x, y)
         else:
             return self.mrn_distance(x, y)
 
     @jax.jit
     def critic_loss(self, batch, grad_params):
-        batch_size = batch['observations'].shape[0]
+        batch_size = batch["observations"].shape[0]
 
-        phi = self.network.select('phi')(batch['observations'], batch['actions'], params=grad_params)
-        psi_s = self.network.select('psi')(batch['observations'], params=grad_params)
-        psi_next = self.network.select('psi')(batch['next_observations'], params=grad_params)
-        psi_g = self.network.select('psi')(batch['value_goals'], params=grad_params)
+        phi = self.network.select("phi")(
+            batch["observations"], batch["actions"], params=grad_params
+        )
+        psi_s = self.network.select("psi")(batch["observations"], params=grad_params)
+        psi_next = self.network.select("psi")(
+            batch["next_observations"], params=grad_params
+        )
+        psi_g = self.network.select("psi")(batch["value_goals"], params=grad_params)
 
         if len(phi.shape) == 2:  # Non-ensemble
             phi = phi[None, ...]
@@ -97,7 +109,7 @@ class TMDAgent(flax.struct.PyTreeNode):
             lambda _logits: optax.softmax_cross_entropy(logits=_logits.T, labels=I),
         )(logits)
         contrastive_loss = jnp.mean(contrastive_loss)
-        if self.config['stopgrad_phi_invariance']:
+        if self.config["stopgrad_phi_invariance"]:
             action_dist = self.distance(psi_s, jax.lax.stop_gradient(phi))
         else:
             action_dist = self.distance(psi_s, phi)
@@ -106,10 +118,12 @@ class TMDAgent(flax.struct.PyTreeNode):
 
         dist_next = self.distance(psi_next[:, :, None], psi_g[:, None, :])
 
-        t = self.config['t']
-        gamma = self.config['discount']
-        if self.config['stopgrad_psi_backup']:
-            dist = self.distance(phi[:, :, None], jax.lax.stop_gradient(psi_g[:, None, :]))
+        t = self.config["t"]
+        gamma = self.config["discount"]
+        if self.config["stopgrad_psi_backup"]:
+            dist = self.distance(
+                phi[:, :, None], jax.lax.stop_gradient(psi_g[:, None, :])
+            )
         dist_next = jax.lax.stop_gradient(dist_next)
 
         delta = dist - dist_next
@@ -117,11 +131,18 @@ class TMDAgent(flax.struct.PyTreeNode):
         delta_clipped = jnp.where(mask, t, delta)
         divergence = jnp.where(mask, delta, gamma * jnp.exp(delta_clipped) - dist)
 
-        dw = self.config['diag_backup']
-        divergence = divergence * (1 - dw) + jnp.diagonal(divergence, axis1=1, axis2=2)[..., None] * dw
+        dw = self.config["diag_backup"]
+        divergence = (
+            divergence * (1 - dw)
+            + jnp.diagonal(divergence, axis1=1, axis2=2)[..., None] * dw
+        )
         backup_loss = jnp.mean(divergence)
 
-        critic_loss = contrastive_loss + action_invariance_loss + self.config['zeta'] * backup_loss
+        critic_loss = (
+            contrastive_loss
+            + action_invariance_loss
+            + self.config["zeta"] * backup_loss
+        )
 
         logits = jnp.mean(logits, axis=0)
         correct = jnp.argmax(logits, axis=1) == jnp.argmax(I, axis=1)
@@ -132,63 +153,68 @@ class TMDAgent(flax.struct.PyTreeNode):
             (contrastive_loss, backup_loss, action_invariance_loss),
             critic_loss,
             {
-                'contrastive_loss': contrastive_loss,
-                'action_invariance_loss': action_invariance_loss,
-                'backup_loss': backup_loss,
-                'critic_loss': critic_loss,
-                'binary_accuracy': jnp.mean((logits > 0) == I),
-                'categorical_accuracy': jnp.mean(correct),
-                'logits_pos': logits_pos,
-                'logits_neg': logits_neg,
-                'logits': logits.mean(),
-                'dist': dist.mean(),
-                'biggest_diff_in_dist': jnp.max(dist - dist_next),
+                "contrastive_loss": contrastive_loss,
+                "action_invariance_loss": action_invariance_loss,
+                "backup_loss": backup_loss,
+                "critic_loss": critic_loss,
+                "binary_accuracy": jnp.mean((logits > 0) == I),
+                "categorical_accuracy": jnp.mean(correct),
+                "logits_pos": logits_pos,
+                "logits_neg": logits_neg,
+                "logits": logits.mean(),
+                "dist": dist.mean(),
+                "biggest_diff_in_dist": jnp.max(dist - dist_next),
             },
         )
 
     @jax.jit
     def actor_loss(self, batch, grad_params, rng=None):
         # Maximize log Q if actor_log_q is True (which is default).
-        if self.config['use_latent']:
+        if self.config["use_latent"]:
             psi_s, psi_g = (
-                self.network.select('psi')(batch['observations'], params=grad_params),
-                self.network.select('psi')(batch['actor_goals'], params=grad_params),
+                self.network.select("psi")(batch["observations"], params=grad_params),
+                self.network.select("psi")(batch["actor_goals"], params=grad_params),
             )
             if len(psi_s.shape) == 3:
                 psi_s = jnp.mean(psi_s, axis=0)
                 psi_g = jnp.mean(psi_g, axis=0)
-            if self.config['freeze_enc_for_actor_grad']:
-                psi_s, psi_g = jax.lax.stop_gradient(psi_s), jax.lax.stop_gradient(psi_g)
-            dist = self.network.select('actor')(psi_s, psi_g, params=grad_params)
+            if self.config["freeze_enc_for_actor_grad"]:
+                psi_s, psi_g = (
+                    jax.lax.stop_gradient(psi_s),
+                    jax.lax.stop_gradient(psi_g),
+                )
+            dist = self.network.select("actor")(psi_s, psi_g, params=grad_params)
         else:
-            dist = self.network.select('actor')(batch['observations'], batch['actor_goals'], params=grad_params)
-        if self.config['const_std']:
+            dist = self.network.select("actor")(
+                batch["observations"], batch["actor_goals"], params=grad_params
+            )
+        if self.config["const_std"]:
             q_actions = jnp.clip(dist.mode(), -1, 1)
         else:
             q_actions = jnp.clip(dist.sample(seed=rng), -1, 1)
 
-        phi = self.network.select('phi')(batch['observations'], q_actions)
-        psi = self.network.select('psi')(batch['actor_goals'])
+        phi = self.network.select("phi")(batch["observations"], q_actions)
+        psi = self.network.select("psi")(batch["actor_goals"])
         q1, q2 = -self.distance(phi, psi)
         q = jnp.minimum(q1, q2)
 
         # Normalize Q values by the absolute mean to make the loss scale invariant.
         q_loss = -q.mean() / jax.lax.stop_gradient(jnp.abs(q).mean() + 1e-6)
-        log_prob = dist.log_prob(batch['actions'])
+        log_prob = dist.log_prob(batch["actions"])
 
-        bc_loss = -(self.config['alpha'] * log_prob).mean()
+        bc_loss = -(self.config["alpha"] * log_prob).mean()
 
         actor_loss = q_loss + bc_loss
 
         return actor_loss, {
-            'actor_loss': actor_loss,
-            'q_loss': q_loss,
-            'bc_loss': bc_loss,
-            'q_mean': q.mean(),
-            'q_abs_mean': jnp.abs(q).mean(),
-            'bc_log_prob': log_prob.mean(),
-            'mse': jnp.mean((dist.mode() - batch['actions']) ** 2),
-            'std': jnp.mean(dist.scale_diag),
+            "actor_loss": actor_loss,
+            "q_loss": q_loss,
+            "bc_loss": bc_loss,
+            "q_mean": q.mean(),
+            "q_abs_mean": jnp.abs(q).mean(),
+            "bc_log_prob": log_prob.mean(),
+            "mse": jnp.mean((dist.mode() - batch["actions"]) ** 2),
+            "std": jnp.mean(dist.scale_diag),
         }
 
     @jax.jit
@@ -196,16 +222,18 @@ class TMDAgent(flax.struct.PyTreeNode):
         info = {}
         rng = rng if rng is not None else self.rng
 
-        (contrastive_loss, backup_loss, action_invariance_loss), critic_loss, critic_info = self.critic_loss(
-            batch, grad_params
-        )
+        (
+            (contrastive_loss, backup_loss, action_invariance_loss),
+            critic_loss,
+            critic_info,
+        ) = self.critic_loss(batch, grad_params)
         for k, v in critic_info.items():
-            info[f'critic/{k}'] = v
+            info[f"critic/{k}"] = v
 
         rng, actor_rng = jax.random.split(rng)
         actor_loss, actor_info = self.actor_loss(batch, grad_params, actor_rng)
         for k, v in actor_info.items():
-            info[f'actor/{k}'] = v
+            info[f"actor/{k}"] = v
 
         loss = critic_loss + actor_loss
         return loss, info
@@ -215,7 +243,9 @@ class TMDAgent(flax.struct.PyTreeNode):
         new_rng, rng = jax.random.split(self.rng)
 
         def loss_fn(grad_params):
-            return self.total_loss(batch, grad_params, rng=rng, contrastive_only=contrastive_only)
+            return self.total_loss(
+                batch, grad_params, rng=rng, contrastive_only=contrastive_only
+            )
 
         new_network, info = self.network.apply_loss_fn(loss_fn=loss_fn)
 
@@ -229,16 +259,21 @@ class TMDAgent(flax.struct.PyTreeNode):
         seed=None,
         temperature=1.0,
     ):
-        if self.config['use_latent']:
-            psi_s, psi_g = self.network.select('psi')(observations), self.network.select('psi')(goals)
+        if self.config["use_latent"]:
+            psi_s, psi_g = (
+                self.network.select("psi")(observations),
+                self.network.select("psi")(goals),
+            )
             if len(psi_s.shape) == 2:  # in inference, we don't have batch dimension
                 psi_s = jnp.mean(psi_s, axis=0)
                 psi_g = jnp.mean(psi_g, axis=0)
-            dist = self.network.select('actor')(psi_s, psi_g, temperature=temperature)
+            dist = self.network.select("actor")(psi_s, psi_g, temperature=temperature)
         else:
-            dist = self.network.select('actor')(observations, goals, temperature=temperature)
+            dist = self.network.select("actor")(
+                observations, goals, temperature=temperature
+            )
         actions = dist.sample(seed=seed)
-        if not self.config['discrete']:
+        if not self.config["discrete"]:
             actions = jnp.clip(actions, -1, 1)
         return actions
 
@@ -255,66 +290,66 @@ class TMDAgent(flax.struct.PyTreeNode):
         rng, init_rng = jax.random.split(rng, 2)
 
         ex_goals = ex_observations
-        if config['discrete']:
+        if config["discrete"]:
             action_dim = ex_actions.max() + 1
         else:
             action_dim = ex_actions.shape[-1]
 
         # Define encoders.
         encoders = dict()
-        if config['encoder'] is not None:
-            encoder_module = encoder_modules[config['encoder']]
-            encoders['actor'] = GCEncoder(concat_encoder=encoder_module())
-            encoders['state'] = encoder_module()
-        if config['discrete']:
+        if config["encoder"] is not None:
+            encoder_module = encoder_modules[config["encoder"]]
+            encoders["actor"] = GCEncoder(concat_encoder=encoder_module())
+            encoders["state"] = encoder_module()
+        if config["discrete"]:
             phi_def = DiscreteStateActionRepresentation(
-                hidden_dims=config['value_hidden_dims'],
-                latent_dim=config['latent_dim'],
-                layer_norm=config['layer_norm'],
+                hidden_dims=config["value_hidden_dims"],
+                latent_dim=config["latent_dim"],
+                layer_norm=config["layer_norm"],
                 ensemble=True,
                 value_exp=True,
-                state_encoder=encoders.get('state'),
+                state_encoder=encoders.get("state"),
                 action_dim=action_dim,
             )
             psi_def = DiscreteStateActionRepresentation(
-                hidden_dims=config['value_hidden_dims'],
-                latent_dim=config['latent_dim'],
-                layer_norm=config['layer_norm'],
+                hidden_dims=config["value_hidden_dims"],
+                latent_dim=config["latent_dim"],
+                layer_norm=config["layer_norm"],
                 ensemble=True,
                 value_exp=True,
-                state_encoder=encoders.get('state'),
+                state_encoder=encoders.get("state"),
                 action_dim=action_dim,
             )
             actor_def = GCDiscreteActor(
-                hidden_dims=config['actor_hidden_dims'],
+                hidden_dims=config["actor_hidden_dims"],
                 action_dim=action_dim,
-                gc_encoder=encoders.get('actor'),
+                gc_encoder=encoders.get("actor"),
             )
         else:
             phi_def = StateRepresentation(
-                hidden_dims=config['value_hidden_dims'],
-                latent_dim=config['latent_dim'],
-                layer_norm=config['layer_norm'],
+                hidden_dims=config["value_hidden_dims"],
+                latent_dim=config["latent_dim"],
+                layer_norm=config["layer_norm"],
                 ensemble=True,
                 value_exp=True,
-                state_encoder=encoders.get('state'),
+                state_encoder=encoders.get("state"),
             )
             psi_def = StateRepresentation(
-                hidden_dims=config['value_hidden_dims'],
-                latent_dim=config['latent_dim'],
-                layer_norm=config['layer_norm'],
+                hidden_dims=config["value_hidden_dims"],
+                latent_dim=config["latent_dim"],
+                layer_norm=config["layer_norm"],
                 ensemble=True,
                 value_exp=True,
-                state_encoder=encoders.get('state'),
+                state_encoder=encoders.get("state"),
             )
             actor_def = GCActor(
-                hidden_dims=config['actor_hidden_dims'],
+                hidden_dims=config["actor_hidden_dims"],
                 action_dim=action_dim,
                 state_dependent_std=False,
-                const_std=config['const_std'],
-                gc_encoder=encoders.get('actor'),
+                const_std=config["const_std"],
+                gc_encoder=encoders.get("actor"),
             )
-        if config['use_iqe']:
+        if config["use_iqe"]:
             network_info = dict(
                 actor=(actor_def, (ex_observations, ex_goals)),
                 phi=(phi_def, (ex_observations, ex_actions)),
@@ -322,8 +357,8 @@ class TMDAgent(flax.struct.PyTreeNode):
                 alpha_raw=(Param(), ()),
             )
         else:
-            if config['use_latent']:
-                embed = jnp.zeros((1, config['latent_dim']))
+            if config["use_latent"]:
+                embed = jnp.zeros((1, config["latent_dim"]))
                 network_info = dict(
                     actor=(actor_def, (embed, embed)),
                     phi=(phi_def, (ex_observations, ex_actions)),
@@ -339,8 +374,8 @@ class TMDAgent(flax.struct.PyTreeNode):
         network_args = {k: v[1] for k, v in network_info.items()}
 
         network_def = ModuleDict(networks)
-        network_tx = optax.adam(learning_rate=config['lr'])
-        network_params = network_def.init(init_rng, **network_args)['params']
+        network_tx = optax.adam(learning_rate=config["lr"])
+        network_params = network_def.init(init_rng, **network_args)["params"]
         network = TrainState.create(network_def, network_params, tx=network_tx)
 
         return cls(rng, network=network, config=flax.core.FrozenDict(**config))
@@ -350,7 +385,7 @@ def get_config():
     config = ml_collections.ConfigDict(
         dict(
             # Agent hyperparameters.
-            agent_name='tmd',  # Agent name.
+            agent_name="tmd",  # Agent name.
             lr=3e-4,
             components=8,  # Number of components to average in the MRN/IQE distance ensemble.
             batch_size=512,  # Batch size.
@@ -366,13 +401,15 @@ def get_config():
             diag_backup=0.5,  # Weighting of backups on diagonal (i.e., for s,g ~ p(s,g)) vs. off-diagonal (i.e., for s,g ~ p(s)p(g)).
             stopgrad_psi_backup=False,  # Whether to stop gradient for psi in the backup loss.
             stopgrad_phi_invariance=False,  # Whether to stop gradient for phi in the invariance loss.
-            encoder=ml_collections.config_dict.placeholder(str),  # Visual encoder name (None, 'impala_small', etc.).
+            encoder=ml_collections.config_dict.placeholder(
+                str
+            ),  # Visual encoder name (None, 'impala_small', etc.).
             actor_log_q=True,  # Whether to maximize log Q (True) or Q itself (False) in the actor loss.
             const_std=True,  # Whether to use constant standard deviation for the actor.
             discrete=False,  # Whether the action space is discrete.
             # Dataset hyperparameters.
             oraclerep=False,
-            dataset_class='GCDataset',  # Dataset class name.
+            dataset_class="GCDataset",  # Dataset class name.
             value_p_curgoal=0.0,  # Probability of using the current state as the value goal.
             value_p_trajgoal=1.0,  # Probability of using a future state in the same trajectory as the value goal.
             value_p_randomgoal=0.0,  # Probability of using a random state as the value goal.
@@ -386,7 +423,9 @@ def get_config():
             use_iqe=False,  # Whether to use IQE distance or MRN distance
             use_latent=False,  # Whether to use latent for policy action sampling
             freeze_enc_for_actor_grad=False,  # Whether to stop grad for actor when using encoder
-            frame_stack=ml_collections.config_dict.placeholder(int),  # Number of frames to stack.
+            frame_stack=ml_collections.config_dict.placeholder(
+                int
+            ),  # Number of frames to stack.
         )
     )
     return config

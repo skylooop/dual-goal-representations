@@ -19,7 +19,11 @@ class GCHilbertRepresentationValue(nn.Module):
         if self.ensemble:
             mlp_module = ensemblize(mlp_module, 2)
 
-        self.phi = mlp_module((*self.hidden_dims, self.latent_dim), activate_final=False, layer_norm=self.layer_norm)
+        self.phi = mlp_module(
+            (*self.hidden_dims, self.latent_dim),
+            activate_final=False,
+            layer_norm=self.layer_norm,
+        )
 
     def __call__(self, observations, goals=None):
         """
@@ -54,8 +58,16 @@ class GCAsymmetricHilbertRepresentationValue(nn.Module):
         if self.ensemble:
             mlp_module = ensemblize(mlp_module, 2)
 
-        self.phi = mlp_module((*self.hidden_dims, self.latent_dim), activate_final=False, layer_norm=self.layer_norm)
-        self.psi = mlp_module((*self.hidden_dims, self.latent_dim), activate_final=False, layer_norm=self.layer_norm)
+        self.phi = mlp_module(
+            (*self.hidden_dims, self.latent_dim),
+            activate_final=False,
+            layer_norm=self.layer_norm,
+        )
+        self.psi = mlp_module(
+            (*self.hidden_dims, self.latent_dim),
+            activate_final=False,
+            layer_norm=self.layer_norm,
+        )
 
     def __call__(self, observations, goals=None):
         """
@@ -106,7 +118,9 @@ class GCMRNRepresentationValue(nn.Module):
         else:
             # Goal encoding; in this case, observations = goals to be encoded.
             dummy_observation = jnp.zeros_like(observations)
-            _, _, phi_g = self.network(dummy_observation, observations, is_phi=False, info=True)
+            _, _, phi_g = self.network(
+                dummy_observation, observations, is_phi=False, info=True
+            )
             return phi_g
 
 
@@ -140,7 +154,9 @@ class GCIQERepresentationValue(nn.Module):
         else:
             # Goal encoding; in this case, observations = goals to be encoded.
             dummy_observation = jnp.zeros_like(observations)
-            _, _, phi_g = self.network(dummy_observation, observations, is_phi=False, info=True)
+            _, _, phi_g = self.network(
+                dummy_observation, observations, is_phi=False, info=True
+            )
             return phi_g
 
 
@@ -178,7 +194,9 @@ class GCBilinearRepresentationValue(nn.Module):
         else:
             # Goal encoding; in this case, observations = goals to be encoded.
             dummy_observation = jnp.zeros_like(observations)
-            v, phi, psi = self.network(dummy_observation, observations, actions=None, info=True)
+            v, phi, psi = self.network(
+                dummy_observation, observations, actions=None, info=True
+            )
             return psi
 
 
@@ -189,15 +207,15 @@ def DualRepresentationValue(type):
         type: Type of value parameterization ('bilinear', 'hilbert', 'asymmetric', 'mrn', or 'iqe').
     """
     match type:
-        case 'bilinear':
+        case "bilinear":
             return GCBilinearRepresentationValue
-        case 'hilbert':
+        case "hilbert":
             return GCHilbertRepresentationValue
-        case 'asymmetric':
+        case "asymmetric":
             return GCAsymmetricHilbertRepresentationValue
-        case 'mrn':
+        case "mrn":
             return GCMRNRepresentationValue
-        case 'iqe':
+        case "iqe":
             return GCIQERepresentationValue
         case _:
-            raise ValueError('Unknown representation type.')
+            raise ValueError("Unknown representation type.")

@@ -113,7 +113,7 @@ class GCEncoder(nn.Module):
     concat_encoder: nn.Module = None
 
     @nn.compact
-    def __call__(self, observations, goals=None, goal_encoded=False):
+    def __call__(self, observations, goals=None, goal_encoded=False, listwise=False):
         """Returns the representations of observations and goals.
 
         If `goal_encoded` is True, `goals` is assumed to be already encoded representations. In this case, either
@@ -132,7 +132,10 @@ class GCEncoder(nn.Module):
                     reps.append(self.goal_encoder(goals))
                 if self.concat_encoder is not None:
                     reps.append(self.concat_encoder(jnp.concatenate([observations, goals], axis=-1)))
-        reps = jnp.concatenate(reps, axis=-1)
+        
+        if not listwise:
+            reps = jnp.concatenate(reps, axis=-1)
+        
         return reps
 
 

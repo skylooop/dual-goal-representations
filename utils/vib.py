@@ -38,7 +38,9 @@ class VIB(nn.Module):
             if self.encoder is not None:
                 goal = self.encoder(goal)
             else:
-                raise ValueError('Cannot encode goals without a default encoder module.')
+                raise ValueError(
+                    "Cannot encode goals without a default encoder module."
+                )
 
         mean, log_stds = nn.Dense(self.rep_dim)(goal), nn.Dense(self.rep_dim)(goal)
 
@@ -48,18 +50,20 @@ class VIB(nn.Module):
         dist = distrax.MultivariateNormalDiag(loc=mean, scale_diag=stds)
         z = dist.sample(seed=rng)
 
-        prior = distrax.MultivariateNormalDiag(loc=jnp.zeros_like(mean), scale_diag=jnp.ones_like(stds))
+        prior = distrax.MultivariateNormalDiag(
+            loc=jnp.zeros_like(mean), scale_diag=jnp.ones_like(stds)
+        )
         kl = dist.kl_divergence(prior)
 
         return (
             z,
             (self.beta * kl).mean(),
             {
-                'kl_means_min': mean.min(),
-                'kl_means_mean': mean.mean(),
-                'kl_means_max': mean.max(),
-                'kl_stds_min': stds.min(),
-                'kl_stds_mean': stds.mean(),
-                'kl_stds_max': stds.max(),
+                "kl_means_min": mean.min(),
+                "kl_means_mean": mean.mean(),
+                "kl_means_max": mean.max(),
+                "kl_stds_min": stds.min(),
+                "kl_stds_mean": stds.mean(),
+                "kl_stds_max": stds.max(),
             },
         )

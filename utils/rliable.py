@@ -14,6 +14,7 @@ import scipy.stats
 # Aggregate metrics
 # ---------------------------------------------------------------------------
 
+
 def aggregate_iqm(scores: np.ndarray) -> float:
     """Interquartile mean (25% trimmed mean) across all runs and tasks.
 
@@ -42,7 +43,10 @@ def aggregate_optimality_gap(scores: np.ndarray, gamma: float = 1.0) -> float:
 # Stratified bootstrap confidence intervals
 # ---------------------------------------------------------------------------
 
-def _stratified_bootstrap_sample(scores: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+
+def _stratified_bootstrap_sample(
+    scores: np.ndarray, rng: np.random.Generator
+) -> np.ndarray:
     """Draw one stratified bootstrap sample.
 
     Resamples *runs* (rows) independently for each task (column),
@@ -101,6 +105,7 @@ def get_interval_estimates(
 # Pairwise comparison
 # ---------------------------------------------------------------------------
 
+
 def probability_of_improvement(scores_x: np.ndarray, scores_y: np.ndarray) -> float:
     """P(X > Y) averaged across tasks using Mann-Whitney U test.
 
@@ -119,7 +124,9 @@ def probability_of_improvement(scores_x: np.ndarray, scores_y: np.ndarray) -> fl
             probs.append(0.5)
         else:
             u_stat, _ = scipy.stats.mannwhitneyu(
-                scores_x[:, t], scores_y[:, t], alternative='greater',
+                scores_x[:, t],
+                scores_y[:, t],
+                alternative="greater",
             )
             probs.append(u_stat / (n_x * n_y))
     return float(np.mean(probs))
@@ -128,6 +135,7 @@ def probability_of_improvement(scores_x: np.ndarray, scores_y: np.ndarray) -> fl
 # ---------------------------------------------------------------------------
 # Score distribution (for performance profiles)
 # ---------------------------------------------------------------------------
+
 
 def score_distribution(scores: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
     """Fraction of runs×tasks achieving score ≥ τ for each threshold τ.

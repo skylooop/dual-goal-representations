@@ -1,0 +1,360 @@
+\documentclass{article}
+
+
+
+\usepackage[preprint]{neurips_2024}
+\setcitestyle{numbers,square,comma}
+\usepackage{minted}
+\input{macro}
+
+
+
+
+
+
+
+\usepackage{comment}
+\usepackage[utf8]{inputenc} %
+\usepackage[T1]{fontenc}    %
+\usepackage[colorlinks]{hyperref}       %
+\usepackage{url}            %
+\usepackage{booktabs}       %
+\usepackage{amsfonts}       %
+\usepackage{nicefrac}       %
+\usepackage{microtype}      %
+\usepackage{xcolor}         %
+\usepackage{cancel}
+\usepackage{wrapfig}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+
+\input{math_commands}
+\providecommand{\ben}[2][]{{\protect\color{magenta}{[\textsc{Ben}:\textbf{#1} #2]}}}
+
+\providecommand{\mahsa}[2][]{{\protect\color{cyan}{[\textsc{Mahsa}:\textbf{#1} #2]}}}
+
+\providecommand{\grace}[2][]{{\protect\color{violet}{[\textsc{Grace}:\textbf{#1} #2]}}}
+
+\providecommand{\dilip}[2][]{{\protect\color{orange}{[\textsc{Dilip}:\textbf{#1} #2]}}}
+\newcommand{\website}{\url{https://mahsa-bastankhah.github.io/demystifying-single-goal-exploration/}}
+
+
+\definecolor{mypurple}{HTML}{7A4988}
+\hypersetup{urlcolor=mypurple,citecolor=mypurple,linkcolor=mypurple}
+
+
+\title{Demystifying the Mechanisms Behind \\ Emergent Exploration in Goal-conditioned RL}
+
+\author{
+\textbf{Mahsa Bastankhah}$^{1*}$ \quad 
+\textbf{Grace Liu}$^{2*}$ \\[0.25em]
+\textbf{Dilip Arumugam}$^1$ \quad 
+\textbf{Thomas L. Griffiths}$^1$ \quad 
+\textbf{Benjamin Eysenbach}$^1$ \\[0.5em]
+$^1$Princeton University \quad 
+$^2$Carnegie Mellon University \\[0.25em]
+\texttt{mb6458@princeton.edu, gliu2@andrew.cmu.edu} \\
+\hfill \small $^*$Equal contribution
+}
+
+
+
+
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+\begin{document}
+
+
+\maketitle
+
+\begin{abstract}
+In this work, we take a first step toward elucidating the mechanisms behind emergent exploration in unsupervised reinforcement learning.  We study Single-Goal Contrastive Reinforcement Learning (SGCRL)~\citep{liu2025a}, a self-supervised algorithm capable of solving challenging long-horizon goal-reaching tasks without external rewards or curricula. We combine theoretical analysis of the algorithm's objective function with controlled experiments to understand what drives its exploration.
+We show that SGCRL maximizes implicit rewards shaped by its learned representations. These representations automatically modify the reward landscape to promote exploration before reaching the goal and exploitation thereafter. Our experiments also demonstrate that these exploration dynamics arise from learning low-rank representations of the state space rather than from neural network function approximation. Our improved understanding enables us to adapt SGCRL to perform safety-aware exploration.
+
+ \textsc{Code}: \footnotesize \href{https://mahsa-bastankhah.github.io/demystifying-single-goal-exploration/}{\texttt{mahsa-bastankhah.github.io/demystifying-single-goal-exploration/}}
+\end{abstract}
+
+\section{Introduction}
+Recent breakthroughs in deep reinforcement learning (RL) have revealed emergent behaviors: agents that develop skills without explicit rewards~\citep{liu2025a}, learn to plan without world models~\citep{bush2025interpreting,simmons2025deep}, and exhibit sophisticated exploration in open-ended environments~\citep{team2021open}.
+For example, Single-Goal Contrastive Reinforcement Learning (SGCRL), learns several manipulation skills before receiving any rewards and without any explicit skill-learning objectives~\citep{liu2025a}. 
+Subsequent work has demonstrated this phenomenon in robotic manipulation~\citep{liu2025a}, locomotion~\citep{bortkiewicz2025accelerating}, and multi-agent tasks~\citep{nimonkar2025selfsupervised} (see Fig.~\ref{fig:tasks}), but the underlying mechanism that drives this emergent exploration remains unknown.
+
+
+
+\begin{wrapfigure}[13]{R}{0.4\linewidth} %
+    \centering
+    \vspace{-8pt} %
+    \includegraphics[width=\linewidth,trim=0 0 0 0,clip]{images/tasks.pdf}
+    \caption{SGCRL exhibits emergent exploration on a range of tasks. But why?
+    }
+    \label{fig:tasks}
+\end{wrapfigure}
+
+Conventional wisdom suggests that emergent properties arise from using large models~\citep{bubeck2023sparks},  but even small neural networks learn feature hierarchies~\citep{krizhevsky2009learning}, and learning word representations that support analogical reasoning is a result of the choice of loss function (not architecture)~\citep{hashimoto2016word, arora2016latent}.
+In the context of reinforcement learning, the extent to which emergent behaviors depend on neural network function approximation remains an open research question.
+Without understanding the drivers of behavior, we cannot reliably predict when, how, or why exploration strategies will emerge, limiting our ability to use these models safely and reliably.
+
+Methodologically, our goal of \textit{understanding} this phenomenon sits askew to the standard ML toolkit used to optimize performance on benchmark tasks.  We thus take inspiration from cognitive science, where researchers study intelligent behavior with a rich toolkit including rational analysis \citep{anderson1990adaptive}, intervention experiments \citep{bower1989experimental}, and cognitive modeling \citep{mcclelland2009place}. As a case study in how methods from cognitive science can be used to study the properties of AI models, we adapt these methods to understand emergent exploration in SGCRL. Specifically, we (1) theoretically analyze the optimization objective to uncover the implicit drivers of agent behavior, (2) conduct controlled intervention experiments on these behavioral drivers, and (3) build a simple model of the exploration mechanism in a tabular setting.
+
+
+
+
+
+
+
+The main contribution of this paper is to show that it is possible to gain insight into the emergent behavior of even relatively complex learning algorithms. We do so by answering a specific question:  \textit{Why does the SGCRL algorithm explore effectively in the absence of any obvious intrinsic or extrinsic rewards?} We show that exploration is driven by the interplay between the actor and the critic. Although the algorithm is trained without external rewards, the actor's objective can be reinterpreted as \textbf{maximizing (implicit) rewards that drive the agent to states that look like the goal}, according to the agent's current representations. The critic shapes this implicit reward landscape by decreasing the representational goal similarity of states along unsuccessful trajectories, pruning them from future exploration. Surprisingly, a simplified tabular model of SGCRL reveals that these \textbf{exploration dynamics arise from learning low-rank representations, rather than from neural network function approximation}. Finally, our analysis provides insight into how to \textbf{adapt SGCRL to perform safety-award exploration}. Our success in analyzing the emergent behavior of this particular algorithm suggests that this approach can be applied productively to other settings where AI systems produce complex and unexpected behaviors.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\section{Related Work}
+
+A growing line of work has discovered emergent behaviors in deep RL: agents demonstrate increasingly sophisticated skills without explicit programming~\citep{liu2025a,bush2025interpreting,simmons2025deep,team2021open}.
+Existing approaches to understanding deep RL agents aim to improve algorithm transparency or explain behavior post-hoc~\citep{heuillet2021explainability,glanois2024survey}. Transparency-based methods include learning low-dimensional, meaningful representations of the state space~\citep{lesort2018state,lesort2019deep,raffin2019decoupling}, labeling actions based on targeted reward components~\citep{juozapaitis2019explainable}, and maintaining subgoals with hierarchical RL~\citep{beyret2019dot, cideron2020higher}. 
+Although transparency-based methods improve algorithmic understanding, they require modified system architectures or auxiliary training tasks~\citep{beyret2019dot,juozapaitis2019explainable}. In contrast, post-hoc methods take the RL algorithm as a black-box, and attempt to distill the representations or predictions into interpretable trees~\citep{bewley2021tripletree, coppens2019distilling} or maps~\citep{greydanus2018visualizing, zahavy2016graying}. Our work differs from prior work in trying to explain behavior from an algorithmic perspective without the overhead of auxiliary training tasks.
+
+Following a recent trend~\citep{hamrick2020levels,binz2023using,frank2023baby,ivanova2025evaluate,ku2025using}, our methodology is inspired by tools in cognitive science
+for understanding intelligent behavior, including rational analysis, intervention experiments, and small-scale models. Rational analysis explains the behavior of agents by considering the optimal solutions to the problems that they face \citep{anderson1990adaptive}. In the context of AI models, this means determining the consequences of maximizing their objective \citep{mccoy2024embers}. Intervention experiments are used to test theories about the causal mechanisms underlying behavior~\citep{bower1989experimental}.  Building simple cognitive models is a tool that can be used to test whether a small set of principles is sufficient to reproduce that behavior~\citep{mcclelland2009place}. Accordingly, we draw on rational analysis and controlled interventions to uncover the implicit objectives driving SGCRL's exploration dynamics and use a simplified computational model of the algorithm to understand how these dynamics arise.
+
+
+
+
+
+
+\section{Preliminaries}\label{sec:prelim}
+
+\paragraph{Problem Setup.} We formulate a sequential decision-making problem as a Markov decision process~\citep{bellman1957markovian,Puterman94} without an explicit reward function. The state space is denoted by $\mathcal{S}$ with the initial state is sampled $s_0 \sim p_0$ and subsequence states are sampled $s_{t+1} \sim p(\cdot \mid s_t, a_t)$. The agent is given a single target goal $g \in \mathcal{S}$, representing the desired state to be reached. The agent must learn a goal-conditioned policy $a_t \sim \pi(\cdot \mid s_t, g)$.
+
+
+
+\paragraph{Goal-conditioned RL.}
+For any policy $\pi$, we define the $\gamma$-discounted occupancy measure~\citep{sutton1999policy} $
+p_{\gamma}^\pi(s_f) \coloneqq (1-\gamma)\sum_{t=0}^\infty \gamma^t p_t^\pi(s_t = s_f)$, where $p_t^\pi(s_t = s_f)$ is the probability of being at state $s_f$ at timestep $t$. Following prior work~\citep{blier2021learning,chane2021goal,eysenbach2022contrastive}, the objective is to learn a policy that maximizes the probability of reaching the goal: $\max_\pi \; p_{\gamma}^\pi(g)$.
+This task is challenging because the agent does not receive any feedback from the environment regarding its intermediate progress towards success.
+
+\paragraph{Single-Goal Contrastive RL (SGCRL).}
+We study SGCRL~\citep{liu2025a}, an actor--critic framework based on temporal contrastive learning.
+In contrast to prior work~\citep{nasiriany2019planning,chane2021goal}, the exploration of SGCRL~\citep{liu2025a} is not guided by a human-designed curricula of tasks or manually specified reward functions.
+The critic estimates the likelihood that a state--action pair $(s,a)$ leads to a future state $s_f$, and is parameterized as $\phi(s,a)^\top \psi(s_f)$, where $\phi(s,a)$ and $\psi(s_f)$ are learned embeddings. The critic embeddings are trained with a contrastive loss where, for each state-action pair, \((s_t,a_t)\), positive future states are drawn by looking \(\Delta \sim \mathrm{Geom}(1-\gamma)\) steps ahead; meanwhile, negative examples are sampled from the marginal distribution $p(s_f) \coloneqq \mathbb{E}_{p(s,a)}\left[p_\gamma(s_f \mid s, a)\right] $. In particular we use the backward InfoNCE loss~\citep{10.5555/3692070.3693574, liu2025a}:
+\begin{equation}\label{eq:infonceloss-def}
+\begin{aligned}
+\max_{\phi, \psi} \,\mathbb{E}_{\substack{(s_i,a_i)\sim p_{\mathcal{D}}(s,a)\\ s_{f}^{(i)}\sim p_{\gamma}^\pi(\cdot\mid s_i,a_i)\\ i=1,\dots,N}}
+\left[\frac{1}{N}\sum_{i=1}^N
+\log\frac{\exp\!\big(\phi(s_i,a_i)^\top \psi(s_{f}^{(i)})\big)}
+{\sum_{j=1}^N \exp\!\big(\phi(s_j,a_j)^\top \psi(s_{f}^{(i)})\big)}\right],\\[6pt]
+\end{aligned}
+\end{equation}
+where $p_{\mathcal{D}}(s,a)$ denotes the empirical data distribution of the replay buffer. 
+The contrastive objective aligns each state-action pair with its true positive future state while discouraging alignments with unrelated states. We normalize all representations by their $\ell_2$ norm. Once trained, the critic encodes a log-$Q$ value
+\(
+\phi(s,a)^\top \psi(s_f) \;=\; \log p_{\gamma}^{\pi}(s_f|s,a) - \log p(s_f),
+\) \citep{eysenbach2022contrastive}.
+
+
+The actor aims to select actions that maximize the likelihood of reaching the goal:
+\begin{equation}\label{eq:actor-obj}
+    \max_{\pi(a \mid s,g)} \;
+    \E_{s \sim p(s), \; a \sim \pi(\cdot \mid s,g)}
+    \Big[\phi(s,a)^\top \psi(g) + \tau H\big(\pi(\cdot \mid s,g)\big)\Big],
+\end{equation}
+where $\tau$ is an entropy-regularization coefficient~\citep{williams1991function}. 
+In the discrete-action setting, the policy optimizing this objective samples actions from a softmax distribution:
+\begin{equation}\label{eq:softmax-actor}
+    \pi(a \mid s,g) = \frac{e^{\tfrac{1}{\tau}\,\phi(s,a)^\top \psi(g)}}{\sum_{a'} e^{\tfrac{1}{\tau}\,\phi(s,a')^\top \psi(g)}}.
+\end{equation}
+For continuous action spaces, we train a parameterized actor $\pi(\cdot \mid s,s_f)$, where $s_f$ denotes a target state that is not restricted to the final hard goal. %
+The algorithm always collects data conditioned on a single goal $g$ and does not make use of rewards, demonstrations, or subgoals. For a complete description of the method, see Appendix~\ref{app:sgcrl-explanation}.
+
+
+\input{Theory}
+
+\section{Experiments}\label{sec:experiments}
+In this section, we present empirical evidence supporting our theoretical characterization of single-goal exploration (Section~\ref{sec:theory}) in both continuous and tabular settings. Through our experiments, we address the following research questions: 
+
+\begin{description}[leftmargin=2em]
+    \item[RQ1.] How do critic representations evolve during training to facilitate exploration and exploitation?
+    \item[RQ2.] How do critic representations influence the actor's data collection strategy?
+\end{description}
+
+Subsection~\ref{subsec:critic} addresses RQ1 using both a simplified model of SGCRL in a tabular setting as well as standard SGCRL in the continuous setting. Subsection~\ref{subsec:rq2} addresses RQ2 in the continuous setting and motivates our findings with preliminary results on how to utilize goal-similarity to improve safety. 
+
+\paragraph{Tasks.}
+We study SGCRL on 2D point maze navigation tasks adapted from prior work~\citep{eysenbach2022contrastive, liu2025a} as well as the Tower of Hanoi goal-reaching task. The navigation tasks involve reaching a goal in various maze configurations including the classic Four Rooms domain~\citep{sutton1999between}, an L-shaped wall, and a spiral wall. The Tower of Hanoi task involves moving a stack of disks across three locations with the constraint that larger disks cannot be placed on smaller ones, and has been used extensively in studies of human problem-solving in cognitive science \citep{simon1975functional}. We do not use rewards or subgoals to solve any of the tasks, and success is determined by whether the goal state is reached at some point during an episode. All training metric curves are averaged over 8 random seeds. All shading denotes one standard error.
+
+\textbf{Tabular SGCRL.} Previous implementations of SGCRL utilize neural network function approximation, raising the question of whether these behaviors are fundamental properties of the SGCRL algorithm or artifacts of neural network dynamics. To isolate the SGCRL exploration mechanism from neural network generalization properties, we designed a simplified computational model of the algorithm for the tabular FourRooms maze and Tower of Hanoi task. Each state $s$ has an embedding $\psi(s)$ stored in a lookup table and updated via the InfoNCE gradient rule (Appendix~\ref{app:Infonce-updates}). We assume the environment follows deterministic transition dynamics and, instead of learning $\phi(s,a)$, further assume access to the ground-truth dynamics $s_{t+1} = p(s_t, a_t)$ (this latter assumption can be relaxed by learning in a model-based fashion). The policy takes actions according to Equation~\ref{eq:softmax-actor}.
+Following the assumptions for Theorem~\ref{theorem:common-comp-dec}, all representations are initialized as
+\(
+\psi(s)=\mathbf{x}+\boldsymbol{\varepsilon}(s),
+\)
+with a global Gaussian seed $\mathbf{x}$ shared across states and small, independent Gaussian noise $\boldsymbol{\varepsilon}(s)$ per state.
+
+\subsection{RQ1. How do critic representations evolve to facilitate exploration and exploitation?}\label{subsec:critic} 
+
+Our theory suggests that SGCRL automatically develops a curriculum of subgoals by updating representations such that unsuccessful paths become less appealing over time (Thm.~\ref{theorem:common-comp-dec}). To observe how representations change in a controlled setting, we conducted a series of experiments with both the simplified tabular SGCRL model and standard SGCRL algorithm, showing that \psisim decreases for states along unsuccessful trajectories and increases for states along successful trajectories. These results support the hypothesis that SGCRL benefits from a natural exploration curriculum that progressively pushes the agent toward unexplored regions. 
+
+\paragraph{Distinct phases of representation updates emerge.} By running a simplified tabular version of SGCRL, we aim to test whether SGCRL's mechanism arise primarily from contrastive learning of low-rank representations rather than from generalization properties of neural networks. Our characterization of SGCRL's exploration mechanism prescribes that representation updates should be distinct before finding the goal compared to after finding the goal. That is, before reaching the goal, we would expect the \psisim of frequently visited states to decrease, and after finding the goal, we would expect the \psisim of frequently visited states to increase. To verify these dynamics, we ran tabular SGCRL in the Tower of Hanoi environment. We measured the correlation between state visitation and goal similarity before and after the agent reached the goal.
+
+
+\begin{wrapfigure}[14]{r}{0.48\textwidth}
+\vspace{-\baselineskip}
+\centering
+\includegraphics[width=\linewidth]{images/correlation_history.pdf}
+\caption{Running SGCRL in a tabular Tower of Hanoi environment reveals distinct phases of learning. First majority success indicates the trial at which the majority of 5 evaluation runs succeeded. The 3 disk task is shown, but results generalize to 4/5 disks.}
+\label{fig:tabular_env}
+\end{wrapfigure}
+
+We find that, even with the simplified tabular model, the agent demonstrates effective exploration and goal-reaching with distinct phases of behavior. Given uniform initialization of all states close to the goal, the correlation between state visitation and goal similarity starts high. As training progresses, the state visitation count and goal similarity become negatively correlated prior to reaching the goal and positively correlated after reaching the goal (see Fig.~\ref{fig:tabular_env}). We also performed an ablation study where we replaced the vectorized representations with a $|\mathcal{S}|\times|\mathcal{S}|$ lookup table of state-goal similarity and updated these scalar values with the same contrastive objective. In this setting, the agent fails to explore efficiently, requiring $\sim100$x more samples than tabular SGCRL. (Appendix~\ref{app:no_representations}). These results indicate that SGCRL's exploration dynamics arise from contrastive learning with low-rank representations rather than from neural network approximation or from the contrastive learning objective alone.
+
+In Appendix~\ref{app:comparison}, we compare the evolution of \psisim in SGCRL with the value function of R-MAX~\citep{brafman2002r}, an optimism-based exploration method for the tabular setting that is provably-efficient~\citep{strehl2009reinforcement}. R-MAX and SGCRL share similar exploration dynamics: R-MAX starts with the belief that all states yield the maximum reward (equivalent to assigning high \psisim in SGCRL), and exploration progressively corrects these estimates as states are visited and their true rewards are revealed. We also refer the reader to Appendix~\ref{app:RND}, which shows that although the exploration dynamics of SGCRL could, in the very worst case, require searching the entire state space to reduce all \psisim values, this does not occur in practice. In continuous settings represented by neural networks, the algorithm avoids exhaustive search. Although our findings suggest that neural network generalization is not the primary reason for SGCRL's exploration mechanism, it nevertheless provides a useful inductive bias:  \psisim reductions for unsuccessful paths generalize to nearby states, improving exploration efficiency.
+
+\textbf{Representations along unsuccessful trajectories become dissimilar to the goal.} \label{par:imaginary-goal}
+To study RQ1 further, we simulate how representations evolve when goals are unreachable. Theorem~\ref{theorem:common-comp-dec} predicts that representations for states along unsuccessful trajectories should become orthogonal to the goal. To test this prediction, we ran an experiment in which we assigned the agent an imaginary goal $\psi(g) = \mathbf{z}$, with $\mathbf{z}$ sampled from a Gaussian distribution. We projected the learned representations into three dimensions using PCA (see Fig~\ref{fig:reprsntation-pca}), 
+with $\mathbf{z}$ aligned to the vertical axis. 
+
+We find that initially the representations cluster near the goal at the top of the unit sphere. Over time, they drift toward the ``equator'', collapsing into the subspace orthogonal to $\mathbf{z}$, while still clustering states from the same room together. The drift reflects the agent’s visitation pattern: states in the bottom-left room, visited first, are pulled away earliest, while states in the top-right room, reached only in later episodes, collapse last. This experiment highlights a key property of the SGCRL data collection strategy: Because the single-goal conditioned policy consistently drives the agent toward areas with higher \psisim (unvisited states), representations of previously visited states are continually pushed further from the goal. These results provide insight into RQ1 and highlight the effectiveness of single-goal exploration, even in settings without a real goal. Moreover, the same exploration dynamic also extends to the multi-goal setting. With a simple modification to the action-selection mechanism, SGCRL is able to reach a distribution of goals (Appendix~\ref{app:multi-goal}).
+
+
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}{0.7\textwidth}
+    \includegraphics[width=\linewidth]{images/orth.pdf}
+    \caption{Representation evolution}
+    \label{fig:goal4000}
+  \end{subfigure}
+  
+  \begin{subfigure}{0.7\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{images/fixed_actor_exps.pdf}
+    \caption{\psisim evolution}
+    \label{fig:fixed_actor}
+  \end{subfigure}
+  
+  \caption{\textbf{(a)} Initially all representations start close to $z$, later collapsing into a subspace orthogonal to $z$, while preserving local room-level structure. \textbf{(b)} \psisim decreases along traversed, unsuccessful paths.
+  }
+  \label{fig:reprsntation-pca}
+\end{figure}
+
+To test whether the same representation trend holds for the continuous setting, we conduct an experiment using standard SGCRL in which we fixed the data collection trajectories to always move in a particular cardinal direction. This experiment allows us to isolate the effect of unsuccessful visitation on representational similarity. We find that initially the \psisim of all states is high, but, over the course of training, states along the frequently traversed paths systematically become less similar to the goal (see Fig~\ref{fig:fixed_actor}). 
+
+\textbf{SGCRL data collection structures representations strategically.} We also investigate whether the single-goal data collection strategy offers distinct advantages over other data collection strategies for the representation shaping described in the above experiment. For the FourRooms task, we compare single-goal data collection with an alternative strategy that samples goals from a uniform distribution. This strategy fails to push representations of frequently visited states far from the goal, preventing effective exploration (Appendix~\ref{app:sgcrl-optimal}). These results indicate that the SGCRL actor is not merely a consumer of well-formed representations, but also an active contributor. Through data collection, it shapes representations in a principled way that decreases \psisim for frequently visited states. 
+ \subsection{RQ2. How do critic representations influence the actor's data collection strategy?}\label{subsec:rq2}
+ 
+Next, we investigate how the dynamic representation updates characterized in Section~\ref{subsec:critic} influence the actor's data collection strategy. Our theory posits that goal-similarity provides an internal reward (Thm. ~\ref{theorem:reward-shaping-q-learning}) to direct agent behavior. In this vein, we conduct intervention experiments to study how goal-similarity influences SGCRL's visitation behavior, with applications to safety-aware exploration. 
+
+ \paragraph{Agent targets states with high \psisim.} In our first experiment, we perturb the initial position of the agent at various training checkpoints to be closer to the goal. \begin{wrapfigure}[12]{r}{0.6\textwidth}
+  \vspace{-0.5em}
+  \centering
+  \includegraphics[width=\linewidth, height=4.5cm, keepaspectratio]{images/perturbation_exps_old.pdf}
+  \caption{SGCRL targets states with high \psisim when initial sttate is perturbed.}
+  \label{fig:perturbation_exps}
+\end{wrapfigure} We observe whether the agent directly targets the goal state or target states that ``look like'' the goal (high \psisim). We find that the agent navigates toward the closest region with high representational goal similarity, even if it can reach the goal directly through a shorter path (see Fig.~\ref{fig:perturbation_exps}).
+To test this behavior further, we conduct another intervention in which we fixed the representations of a patch in the top-right room of the FourRooms environment to match the goal embedding $\psi(g)$. As shown in Fig.~\ref{subfig:red_hole_exp} (top), the agent is strongly attracted to this patch, leading to a substantial increase in visitation of the top-right room compared to the control setup (Fig.~\ref{subfig:red_hole_exp}, bottom). Notably, even when the agent succeeds in reaching the true goal, it frequently detours into this patch along the way. These results yield an answer to RQ2, indicating that the agent is guided by an implicit reward signal based on representational similarity to the goal. This behavior emerges from the learning objective without any explicit programming to seek goal-like states.
+
+
+\begin{wrapfigure}[18]{r}{0.5\textwidth}
+  \vspace{-0.5em}
+  \centering
+  \begin{subfigure}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth, height=4.5cm, keepaspectratio]{images/red-all.pdf}
+    \caption{Interventions}
+    \label{subfig:red_hole_exp}
+  \end{subfigure}%
+  \hspace{0.02\linewidth}
+  \begin{subfigure}[t]{0.48\linewidth}
+    \centering
+    \includegraphics[width=\linewidth, height=4.5cm, keepaspectratio]{images/safety-all.pdf}
+    \caption{Safety}
+    \label{subfig:safety}
+  \end{subfigure}
+  \caption{SGCRL targets states with high \psisim (a) and avoids states with low \psisim (b).}
+  \label{fig:intervention_safety}
+\end{wrapfigure}
+
+
+
+    
+
+
+\paragraph{Agent avoids states with low \psisim.} Based on our characterization of SGCRL's behavioral drivers (Sec.~\ref{sec:theory}), we predict that manipulating contrastive representations allows more fine-grained control of agent behavior during both training and deployment. We tested this prediction by setting the representations of the states in one of the rooms in the continuous FourRooms environment to be the negative of the goal representation ($\psi(s) = -\psi(g) ;\forall s \in \mathcal{R}$). We find that this intervention leads the agent to systematically avoid that region during both training (Figure~\ref{subfig:safety} -- top) and test time (Figure~\ref{subfig:safety} -- bottom). The agent successfully finds alternate paths to the goal while respecting the imposed constraints (see Appendix \ref{app:safety-more-figs} for more figures). These preliminary experiments show that understanding goal representation-driven exploration could lead to improvements in safety and control of goal-reaching tasks, enabling practitioners to guide agent behavior through representation design rather than explicit reward engineering~\citep{ibrahim2024comprehensive}.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\section{Conclusion}
+Through theoretical analysis and controlled experiments, we have shown that SGCRL implicitly maximizes rewards based on representational goal-similarity, enabling effective exploration without explicit rewards. Our results indicate that these exploration dynamics arise from contrastive learning of low-rank representations rather than from function approximation with neural networks. These dynamics align with classic exploration algorithms, like R-MAX and PSRL, that refine a set of candidate desirable states during exploration. This characterization not only helps to explain the success of SGCRL in prior work, but also charts a path for how to retain the strong, appealing theoretical properties of R-MAX/PSRL in high-dimensional as well as long-horizon tasks.~\citep{liu2025a, eysenbach2022contrastive, zheng2023stabilizing}.
+
+Beyond analyzing SGCRL specifically, our analysis provides a  case study for understanding emergent exploration through a lens of cognitive interpretability. We draw on methods in cognitive science to build a theoretical model of behavior and verify this model by conducting intervention experiments and modeling the algorithm in a simplified setting. The particular instantiation of this framework operationalized in this work successfully yields insight into the behavioral drivers of exploration, enabling us to better control these systems for safer deployment. We anticipate that a similar methodology can be used to gain deeper insight into a range of RL algorithms, potentially identifying ways in which those algorithms can be improved through the same implicit, contrastive reward-shaping process~\citep{asmuth2008potential}. 
+
+\paragraph{Limitations.} 
+Our empirical study, through its focus on SGCRL, exclusively focused on goal-reaching tasks and did not consider reward maximization more broadly. We analyzed the learning dynamics of SGCRL but have yet to establish formal theoretical guarantees on its sample efficiency. In future work, we aim to study whether SGCRL can achieve polynomial sample complexity in the tabular setting~\citep{kakade2003sample,strehl2009reinforcement} and extend the method empirically to a broader space of tasks beyond goal reaching. 
+
+\paragraph{Reproducibility Statement.}
+We will provide the source code for tabular SGCRL upon publication. The experiments using standard SGCRL use the codebase and default parameters given in~\citep{liu2025a}. The hyperparameters used for both tabular and standard SGCRL are given in Appendix~\ref{appendix:details}. The proofs of all theoretical results are provided in Appendix~\ref{app:theoretical-results}.
+
+
+\paragraph{Ethics Statement.}
+Our work investigates the exploration dynamics of a self-supervised reinforcement learning algorithm and therefore has no immediate ethical concerns. We also develop a variant that mitigates certain behaviors relevant to safety-critical applications. However, as with many advances in RL, similar techniques could, in principle, be misused to enhance adversarial behavior.
+
+\paragraph{Acknowledgments.}
+Thanks to the members of the Princeton RL lab for feedback on preliminary versions of the work.
+DA and TG were supported by ONR MURI N00014-24-1-2748 and ONR grant N00014-23-1-2510.
+GL acknowledges support by the National Science Foundation Graduate Research Fellowship under Grant No. DGE2140739.
+BE and MB acknowledge support from the National Science Foundation under Award No. 2441665. Any opinions, findings and conclusions or recommendations expressed in this material are those of the author(s) and do not necessarily reflect the views of the National Science Foundation.
+
+% {\small
+% \bibliographystyle{iclr2026_conference}
+% \bibliography{references.bib}
+% }
+
+\input{references.bbl}
+
+\appendix
+\clearpage
+\onecolumn            %
+\section*{Appendix}
+\input{Appendix}      %
+
+
+\end{document}

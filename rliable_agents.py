@@ -25,7 +25,8 @@ import itertools
 
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from utils.rliable import (
@@ -43,25 +44,24 @@ from utils.rliable import (
 # Color palette (colorblind-friendly, from Tol's qualitative scheme)
 # ---------------------------------------------------------------------------
 COLORS = [
-    '#4477AA',  # blue
-    '#EE6677',  # red/pink
-    '#228833',  # green
-    '#CCBB44',  # yellow
-    '#66CCEE',  # cyan
-    '#AA3377',  # purple
-    '#BBBBBB',  # grey
+    "#4477AA",  # blue
+    "#EE6677",  # red/pink
+    "#228833",  # green
+    "#CCBB44",  # yellow
+    "#66CCEE",  # cyan
+    "#AA3377",  # purple
+    "#BBBBBB",  # grey
 ]
 
 
 def load_results(results_dir):
     """Load score matrix and metadata from an eval_trained.py output directory."""
-    score_path = os.path.join(results_dir, 'score_matrix.npy')
-    meta_path = os.path.join(results_dir, 'eval_results.json')
+    score_path = os.path.join(results_dir, "score_matrix.npy")
+    meta_path = os.path.join(results_dir, "eval_results.json")
 
     if not os.path.exists(score_path):
         raise FileNotFoundError(
-            f"score_matrix.npy not found in {results_dir}. "
-            f"Run eval_trained.py first."
+            f"score_matrix.npy not found in {results_dir}. Run eval_trained.py first."
         )
 
     scores = np.load(score_path)
@@ -77,7 +77,10 @@ def load_results(results_dir):
 # Multi-algorithm plots
 # ---------------------------------------------------------------------------
 
-def plot_aggregate_comparison(all_results, labels, save_path, num_bootstraps=50_000, seed=0):
+
+def plot_aggregate_comparison(
+    all_results, labels, save_path, num_bootstraps=50_000, seed=0
+):
     """Grouped horizontal bar chart: IQM, Mean, Median per algorithm with CIs.
 
     Args:
@@ -86,9 +89,9 @@ def plot_aggregate_comparison(all_results, labels, save_path, num_bootstraps=50_
         save_path: output path
     """
     metric_fns = {
-        'IQM': aggregate_iqm,
-        'Mean': aggregate_mean,
-        'Median': aggregate_median,
+        "IQM": aggregate_iqm,
+        "Mean": aggregate_mean,
+        "Median": aggregate_median,
     }
     metric_names = list(metric_fns.keys())
     n_metrics = len(metric_names)
@@ -100,13 +103,17 @@ def plot_aggregate_comparison(all_results, labels, save_path, num_bootstraps=50_
         data[label] = {}
         for mname, mfn in metric_fns.items():
             point, ci = get_interval_estimates(
-                all_results[label], mfn,
-                num_bootstraps=num_bootstraps, seed=seed,
+                all_results[label],
+                mfn,
+                num_bootstraps=num_bootstraps,
+                seed=seed,
             )
             data[label][mname] = (point, ci)
 
     # Plot.
-    fig, axes = plt.subplots(1, n_metrics, figsize=(4 * n_metrics, max(3, 0.6 * n_algos + 1.5)))
+    fig, axes = plt.subplots(
+        1, n_metrics, figsize=(4 * n_metrics, max(3, 0.6 * n_algos + 1.5))
+    )
     if n_metrics == 1:
         axes = [axes]
 
@@ -120,23 +127,27 @@ def plot_aggregate_comparison(all_results, labels, save_path, num_bootstraps=50_
 
         colors = [COLORS[i % len(COLORS)] for i in range(n_algos)]
         ax.barh(
-            y_pos, points,
+            y_pos,
+            points,
             xerr=[errs_lo, errs_hi],
-            color=colors, edgecolor='white', height=0.5,
-            capsize=4, error_kw=dict(lw=1.5, capthick=1.5),
+            color=colors,
+            edgecolor="white",
+            height=0.5,
+            capsize=4,
+            error_kw=dict(lw=1.5, capthick=1.5),
         )
         ax.set_yticks(y_pos)
         ax.set_yticklabels(labels, fontsize=10)
-        ax.set_xlabel('Score', fontsize=10)
+        ax.set_xlabel("Score", fontsize=10)
         ax.set_xlim(0, max(1.05, max(ci_highs) * 1.15) if max(ci_highs) > 0 else 1.05)
         ax.invert_yaxis()
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.set_title(mname, fontsize=12, fontweight='bold')
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_title(mname, fontsize=12, fontweight="bold")
 
-    fig.suptitle('Aggregate Metrics (95% Stratified Bootstrap CI)', fontsize=13, y=1.02)
+    fig.suptitle("Aggregate Metrics (95% Stratified Bootstrap CI)", fontsize=13, y=1.02)
     fig.tight_layout()
-    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -157,16 +168,16 @@ def plot_performance_profiles(all_results, labels, save_path, num_points=101):
         ax.plot(thresholds, fractions, lw=2.2, color=color, label=label)
         ax.fill_between(thresholds, 0, fractions, alpha=0.08, color=color)
 
-    ax.set_xlabel('Score threshold τ', fontsize=11)
-    ax.set_ylabel('Fraction of runs with score ≥ τ', fontsize=11)
+    ax.set_xlabel("Score threshold τ", fontsize=11)
+    ax.set_ylabel("Fraction of runs with score ≥ τ", fontsize=11)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1.05)
-    ax.legend(fontsize=10, loc='upper right', framealpha=0.9)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.set_title('Performance Profile', fontsize=12)
+    ax.legend(fontsize=10, loc="upper right", framealpha=0.9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.set_title("Performance Profile", fontsize=12)
     fig.tight_layout()
-    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -184,35 +195,41 @@ def plot_probability_of_improvement(all_results, labels, save_path):
 
     matrix = np.full((n, n), 0.5)
     for i, j in itertools.combinations(range(n), 2):
-        p = probability_of_improvement(
-            all_results[labels[i]], all_results[labels[j]]
-        )
+        p = probability_of_improvement(all_results[labels[i]], all_results[labels[j]])
         matrix[i, j] = p
         matrix[j, i] = 1 - p
 
     fig, ax = plt.subplots(figsize=(max(4, 0.9 * n + 2), max(3.5, 0.9 * n + 1.5)))
     cmap = plt.cm.RdYlGn
-    im = ax.imshow(matrix, cmap=cmap, vmin=0, vmax=1, aspect='equal')
+    im = ax.imshow(matrix, cmap=cmap, vmin=0, vmax=1, aspect="equal")
 
     ax.set_xticks(range(n))
     ax.set_yticks(range(n))
-    ax.set_xticklabels(labels, fontsize=9, rotation=45, ha='right')
+    ax.set_xticklabels(labels, fontsize=9, rotation=45, ha="right")
     ax.set_yticklabels(labels, fontsize=9)
 
     # Annotate cells.
     for i in range(n):
         for j in range(n):
-            color = 'white' if abs(matrix[i, j] - 0.5) > 0.3 else 'black'
-            ax.text(j, i, f'{matrix[i, j]:.2f}', ha='center', va='center',
-                    fontsize=10, fontweight='bold', color=color)
+            color = "white" if abs(matrix[i, j] - 0.5) > 0.3 else "black"
+            ax.text(
+                j,
+                i,
+                f"{matrix[i, j]:.2f}",
+                ha="center",
+                va="center",
+                fontsize=10,
+                fontweight="bold",
+                color=color,
+            )
 
     cbar = fig.colorbar(im, ax=ax, shrink=0.8)
-    cbar.set_label('P(Row > Column)', fontsize=10)
-    ax.set_title('Probability of Improvement', fontsize=12)
-    ax.set_xlabel('Algorithm (column)', fontsize=10)
-    ax.set_ylabel('Algorithm (row)', fontsize=10)
+    cbar.set_label("P(Row > Column)", fontsize=10)
+    ax.set_title("Probability of Improvement", fontsize=12)
+    ax.set_xlabel("Algorithm (column)", fontsize=10)
+    ax.set_ylabel("Algorithm (row)", fontsize=10)
     fig.tight_layout()
-    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -237,21 +254,27 @@ def plot_per_task_comparison(all_results, labels, task_names, save_path):
         offset = (i - (n_algos - 1) / 2) * width
         color = COLORS[i % len(COLORS)]
         ax.bar(
-            x + offset, means, width * 0.9, yerr=stds,
-            color=color, edgecolor='white', label=label,
-            capsize=2, error_kw=dict(lw=1),
+            x + offset,
+            means,
+            width * 0.9,
+            yerr=stds,
+            color=color,
+            edgecolor="white",
+            label=label,
+            capsize=2,
+            error_kw=dict(lw=1),
         )
 
     ax.set_xticks(x)
-    ax.set_xticklabels(task_names, rotation=45, ha='right', fontsize=9)
-    ax.set_ylabel('Success Rate', fontsize=11)
+    ax.set_xticklabels(task_names, rotation=45, ha="right", fontsize=9)
+    ax.set_ylabel("Success Rate", fontsize=11)
     ax.set_ylim(0, 1.05)
-    ax.legend(fontsize=9, loc='upper right', framealpha=0.9)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.set_title('Per-Task Success Rate (mean ± std)', fontsize=12)
+    ax.legend(fontsize=9, loc="upper right", framealpha=0.9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.set_title("Per-Task Success Rate (mean ± std)", fontsize=12)
     fig.tight_layout()
-    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -259,32 +282,43 @@ def plot_per_task_comparison(all_results, labels, task_names, save_path):
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description='Compare multiple agents using RLiable metrics.',
+        description="Compare multiple agents using RLiable metrics.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
-        '--results_dirs', nargs='+', required=True,
-        help='Paths to eval_trained.py output directories (each must contain score_matrix.npy).',
+        "--results_dirs",
+        nargs="+",
+        required=True,
+        help="Paths to eval_trained.py output directories (each must contain score_matrix.npy).",
     )
     parser.add_argument(
-        '--labels', nargs='+', default=None,
-        help='Human-readable labels for each algorithm (same order as --results_dirs). '
-             'If omitted, inferred from eval_results.json or directory name.',
+        "--labels",
+        nargs="+",
+        default=None,
+        help="Human-readable labels for each algorithm (same order as --results_dirs). "
+        "If omitted, inferred from eval_results.json or directory name.",
     )
     parser.add_argument(
-        '--output_dir', type=str, default='comparison_results',
-        help='Where to save comparison plots and results.',
+        "--output_dir",
+        type=str,
+        default="comparison_results",
+        help="Where to save comparison plots and results.",
     )
     parser.add_argument(
-        '--num_bootstraps', type=int, default=50_000,
-        help='Number of bootstrap replicates.',
+        "--num_bootstraps",
+        type=int,
+        default=50_000,
+        help="Number of bootstrap replicates.",
     )
     parser.add_argument(
-        '--seed', type=int, default=0,
-        help='Random seed for bootstrap.',
+        "--seed",
+        type=int,
+        default=0,
+        help="Random seed for bootstrap.",
     )
     args = parser.parse_args()
 
@@ -301,28 +335,28 @@ def main():
         # Determine label.
         if args.labels and i < len(args.labels):
             label = args.labels[i]
-        elif meta.get('agent_name'):
-            label = meta['agent_name']
+        elif meta.get("agent_name"):
+            label = meta["agent_name"]
         else:
-            label = os.path.basename(rdir.rstrip('/'))
+            label = os.path.basename(rdir.rstrip("/"))
         labels.append(label)
         all_results[label] = scores
         all_meta[label] = meta
 
     # Infer task names from first meta, or generate generic ones.
     first_meta = all_meta[labels[0]]
-    if 'per_task' in first_meta:
-        task_names = list(first_meta['per_task'].keys())
+    if "per_task" in first_meta:
+        task_names = list(first_meta["per_task"].keys())
     else:
         n_tasks = all_results[labels[0]].shape[1]
-        task_names = [f'task{i+1}' for i in range(n_tasks)]
+        task_names = [f"task{i + 1}" for i in range(n_tasks)]
 
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Print summary.
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Comparing {n} algorithms")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     for label in labels:
         s = all_results[label]
         print(f"  {label}: score_matrix shape = {s.shape}")
@@ -330,10 +364,10 @@ def main():
 
     # Compute aggregate metrics.
     metric_fns = {
-        'IQM': aggregate_iqm,
-        'Mean': aggregate_mean,
-        'Median': aggregate_median,
-        'Optimality Gap': aggregate_optimality_gap,
+        "IQM": aggregate_iqm,
+        "Mean": aggregate_mean,
+        "Median": aggregate_median,
+        "Optimality Gap": aggregate_optimality_gap,
     }
 
     comparison_data = {}
@@ -341,54 +375,62 @@ def main():
         comparison_data[label] = {}
         for mname, mfn in metric_fns.items():
             point, ci = get_interval_estimates(
-                all_results[label], mfn,
-                num_bootstraps=args.num_bootstraps, seed=args.seed,
+                all_results[label],
+                mfn,
+                num_bootstraps=args.num_bootstraps,
+                seed=args.seed,
             )
-            comparison_data[label][mname] = {'point': point, 'ci_low': ci[0], 'ci_high': ci[1]}
+            comparison_data[label][mname] = {
+                "point": point,
+                "ci_low": ci[0],
+                "ci_high": ci[1],
+            }
 
     # Print metrics table.
-    print(f"  {'Algorithm':<20}", end='')
+    print(f"  {'Algorithm':<20}", end="")
     for mname in metric_fns:
-        print(f"  {mname:>22}", end='')
+        print(f"  {mname:>22}", end="")
     print()
-    print(f"  {'─'*(20 + 24 * len(metric_fns))}")
+    print(f"  {'─' * (20 + 24 * len(metric_fns))}")
     for label in labels:
-        print(f"  {label:<20}", end='')
+        print(f"  {label:<20}", end="")
         for mname in metric_fns:
             d = comparison_data[label][mname]
-            print(f"  {d['point']:>6.4f} [{d['ci_low']:.3f},{d['ci_high']:.3f}]", end='')
+            print(
+                f"  {d['point']:>6.4f} [{d['ci_low']:.3f},{d['ci_high']:.3f}]", end=""
+            )
         print()
 
     # Pairwise P(improvement).
     if n >= 2:
         print(f"\n  Pairwise P(Row > Column):")
-        print(f"  {'':>20}", end='')
+        print(f"  {'':>20}", end="")
         for l in labels:
-            print(f"  {l:>15}", end='')
+            print(f"  {l:>15}", end="")
         print()
         for i, li in enumerate(labels):
-            print(f"  {li:>20}", end='')
+            print(f"  {li:>20}", end="")
             for j, lj in enumerate(labels):
                 if i == j:
-                    print(f"  {'—':>15}", end='')
+                    print(f"  {'—':>15}", end="")
                 else:
                     p = probability_of_improvement(all_results[li], all_results[lj])
-                    print(f"  {p:>15.3f}", end='')
+                    print(f"  {p:>15.3f}", end="")
             print()
     print()
 
     # Save JSON.
     results_json = {
-        'labels': labels,
-        'metrics': comparison_data,
-        'pairwise_improvement': {},
+        "labels": labels,
+        "metrics": comparison_data,
+        "pairwise_improvement": {},
     }
     for i, j in itertools.combinations(range(n), 2):
         p = probability_of_improvement(all_results[labels[i]], all_results[labels[j]])
-        results_json['pairwise_improvement'][f'{labels[i]} > {labels[j]}'] = p
-        results_json['pairwise_improvement'][f'{labels[j]} > {labels[i]}'] = 1 - p
+        results_json["pairwise_improvement"][f"{labels[i]} > {labels[j]}"] = p
+        results_json["pairwise_improvement"][f"{labels[j]} > {labels[i]}"] = 1 - p
 
-    with open(os.path.join(args.output_dir, 'comparison_results.json'), 'w') as f:
+    with open(os.path.join(args.output_dir, "comparison_results.json"), "w") as f:
         json.dump(results_json, f, indent=2)
     print(f"Results saved to {args.output_dir}/comparison_results.json")
 
@@ -396,32 +438,38 @@ def main():
     print("Generating plots...")
 
     plot_aggregate_comparison(
-        all_results, labels,
-        os.path.join(args.output_dir, 'aggregate_comparison.png'),
-        num_bootstraps=args.num_bootstraps, seed=args.seed,
+        all_results,
+        labels,
+        os.path.join(args.output_dir, "aggregate_comparison.png"),
+        num_bootstraps=args.num_bootstraps,
+        seed=args.seed,
     )
     print(f"  ✓ {args.output_dir}/aggregate_comparison.png")
 
     plot_performance_profiles(
-        all_results, labels,
-        os.path.join(args.output_dir, 'performance_profiles.png'),
+        all_results,
+        labels,
+        os.path.join(args.output_dir, "performance_profiles.png"),
     )
     print(f"  ✓ {args.output_dir}/performance_profiles.png")
 
     plot_probability_of_improvement(
-        all_results, labels,
-        os.path.join(args.output_dir, 'probability_of_improvement.png'),
+        all_results,
+        labels,
+        os.path.join(args.output_dir, "probability_of_improvement.png"),
     )
     print(f"  ✓ {args.output_dir}/probability_of_improvement.png")
 
     plot_per_task_comparison(
-        all_results, labels, task_names,
-        os.path.join(args.output_dir, 'per_task_comparison.png'),
+        all_results,
+        labels,
+        task_names,
+        os.path.join(args.output_dir, "per_task_comparison.png"),
     )
     print(f"  ✓ {args.output_dir}/per_task_comparison.png")
 
     print(f"\nDone! All outputs in {args.output_dir}/")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

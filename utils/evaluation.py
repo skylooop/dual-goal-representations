@@ -16,12 +16,12 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
     return wrapped
 
 
-def flatten(d, parent_key='', sep='.'):
+def flatten(d, parent_key="", sep="."):
     """Flatten a dictionary."""
     items = []
     for k, v in d.items():
         new_key = parent_key + sep + k if parent_key else k
-        if hasattr(v, 'items'):
+        if hasattr(v, "items"):
             items.extend(flatten(v, new_key, sep=sep).items())
         else:
             items.append((new_key, v))
@@ -77,28 +77,45 @@ def evaluate(
     stats = defaultdict(list)
 
     renders = []
-    for i in tqdm(range(num_eval_episodes + num_video_episodes), desc='Episode', colour='red', position=2, leave=False):
+    for i in tqdm(
+        range(num_eval_episodes + num_video_episodes),
+        desc="Episode",
+        colour="red",
+        position=2,
+        leave=False,
+    ):
         traj = defaultdict(list)
         should_render = i >= num_eval_episodes
 
-        observation, info = env.reset(options=dict(task_id=task_id, render_goal=should_render))
-        goal = info.get('goal')
+        observation, info = env.reset(
+            options=dict(task_id=task_id, render_goal=should_render)
+        )
+        goal = info.get("goal")
         if eval_goal_gaussian is not None:
             goal = np.random.normal(goal, eval_goal_gaussian)
         if diff is not None:
-            if not config['oraclerep']:
+            if not config["oraclerep"]:
                 goal = goal / diff
-        goal_frame = info.get('goal_rendered')
+        goal_frame = info.get("goal_rendered")
         done = False
         step = 0
         render = []
         while not done:
             if inferred_latent is not None:
-                action, key = actor_fn(observations=observation, latents=inferred_latent, temperature=eval_temperature)
+                action, key = actor_fn(
+                    observations=observation,
+                    latents=inferred_latent,
+                    temperature=eval_temperature,
+                )
             else:
-                action, key = actor_fn(observations=observation, goals=goal, temperature=eval_temperature, key=key)
+                action, key = actor_fn(
+                    observations=observation,
+                    goals=goal,
+                    temperature=eval_temperature,
+                    key=key,
+                )
             action = np.array(action)
-            if not config.get('discrete'):
+            if not config.get("discrete"):
                 if eval_gaussian is not None:
                     action = np.random.normal(action, eval_gaussian)
                 action = np.clip(action, -1, 1)

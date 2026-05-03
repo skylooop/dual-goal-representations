@@ -15,6 +15,6 @@ exp/
 /home/m_bobrin/dual-goal-representations/results/crl/antmaze-large-navigate-v0_crl_sd000
 results/
 **/checkpoints
-**.npz
+# **.npz
 **/wandb/
 **.png

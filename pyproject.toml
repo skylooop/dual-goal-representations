@@ -18,6 +18,12 @@ dependencies = [
     "optax>=0.2.7",
     "orbax>=0.1.9",
     "orbax-checkpoint>=0.11.32",
+    "pypdf>=6.9.2",
     "rootutils>=1.0.7",
     "wandb[media]==0.25",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.9",
 ]

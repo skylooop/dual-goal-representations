@@ -1,0 +1,1302 @@
+\documentclass{article}
+\usepackage{iclr2026_conference,times}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{amsmath,amssymb,amsthm,bm,mathtools}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{multirow}
+\usepackage{tikz}
+\usepackage{soul}
+\sethlcolor{yellow!30}
+\usepackage{adjustbox}
+\usepackage{tcolorbox}
+
+\usetikzlibrary{positioning, shapes.geometric, arrows}
+
+\newcommand{\indep}{\mathrel{\perp\mspace{-10mu}\perp}}
+\newcommand{\nindep}{\not\!\indep}
+
+% ---------- Theorem Environments ----------
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{assumption}{Assumption}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{corollary}{Corollary}
+\newtheorem{remark}{Remark}
+
+% ---------- Shortcuts ----------
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Sph}{\mathbb{S}}
+
+\newcommand{\ignore}[1]{}
+
+ \ignore{
+\newcommand{\enote}[1]{}%{{\color{blue}{[Eyal: #1]}}}
+\newcommand{\ynote}[1]{}%{{\color{red}{[Yossi: #1]}}}
+\newcommand{\gnote}[1]{}%{{\color{brown}{[Guy: #1]}}}
+\newcommand{\rnote}[1]{}%{{\color{green}{[Roy: #1]}}}
+}
+%\ignore{
+\newcommand{\enote}[1]{{\color{blue}{[Eyal: #1]}}}
+\newcommand{\ynote}[1]{{\color{red}{[Yossi: #1]}}}
+\newcommand{\gnote}[1]{{\color{brown}{[Guy: #1]}}}
+\newcommand{\rnote}[1]{{\color{green}{[Roy: #1]}}}
+%}
+
+
+\DeclareMathOperator{\arctanh}{arctanh}
+\DeclareMathOperator{\prox}{prox}
+\DeclareMathOperator{\sgn}{sgn}
+\DeclareMathOperator{\argmin}{argmin}
+\newcommand{\Ind}[1]{\mathbb{I}\left\{{#1}\right\}}
+%\newcommand{\argmin}{\arg\min}
+\newcommand{\ve}{\varepsilon}
+\newcommand{\CC}{\mathbb{C}}
+\newcommand{\ZZ}{\mathbb{Z}}
+\newcommand{\NN}{\mathbb{N}}
+\newcommand{\QQ}{\mathbb{Q}}
+\newcommand{\eps}{\epsilon}
+\newenvironment{proofof}[1]{{\em Proof of #1\/}:}%
+{\qed}
+%{\hfill\BlackBox\\[2mm]}
+\let\origEqref\eqref
+\renewcommand{\eqref}[1]{Eq.~(\ref{#1})}
+\newcommand{\peqref}[1]{(Eq.~\ref{#1})}
+
+\title{InfoNCE Induces Gaussian Distribution}
+
+\author{
+\makebox[\textwidth][c]{%
+\begin{tabular}{c}
+Roy Betser\thanks{These authors contributed equally to this work.\\ Corresponding author: \texttt{roybe@campus.technion.ac.il}} \quad
+Eyal Gofer\footnotemark[1] \quad
+Meir Yossef Levi \quad
+Guy Gilboa \\
+Technion - Israel Institute of Technology
+\end{tabular}%
+}
+}
+
+\iclrfinalcopy % Uncomment for camera-ready version, but NOT for submission.
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Contrastive learning has become a cornerstone of modern representation learning, allowing training with massive
+unlabeled data for both task-specific and general (foundation) models.
+A prototypical loss in contrastive training is InfoNCE and its variants. 
+In this work, we show that the InfoNCE objective induces Gaussian structure in representations that emerge from contrastive training. 
+We establish this result in two complementary regimes. 
+First, we show that under certain  alignment and concentration assumptions, projections of the high-dimensional representation asymptotically approach a multivariate Gaussian distribution.
+Next, under less strict assumptions, we show that adding a small asymptotically vanishing regularization term that promotes low feature norm and high feature entropy leads to similar asymptotic results.
+We support our analysis with experiments on synthetic and CIFAR-10 datasets across multiple encoder architectures and sizes, demonstrating consistent Gaussian behavior.
+This perspective provides a principled explanation for commonly observed Gaussianity in contrastive representations. 
+The resulting Gaussian model enables principled analytical treatment of learned representations and is expected to support a wide range of applications in contrastive learning.
+\end{abstract}
+
+\section{Introduction}
+Self-supervised learning with contrastive objectives has transformed modern representation learning, enabling scalable training of encoders without labels \citep{oord2018representation, chen2020simple, he2020momentum, radford2021learning}. Among these objectives, the InfoNCE loss balances two pressures: positive pairs are aligned while the batch is repelled to encourage uniformity \citep{wang2020understanding}. This uniformity is often described geometrically as “spreading out’’ the data on the hypersphere \citep{chen2021exploring}, but a deeper probabilistic question remains:
+\emph{What is the actual distribution of representations trained with InfoNCE?}
+
+Answering this question is not only of theoretical interest.
+A Gaussian characterization is directly motivated by recent empirical findings suggesting that ``more Gaussian'' representations can correlate with improved downstream performance \citep{eftekhari2025importance}.
+It also provides a principled basis for practical methods that model contrastive representations as Gaussians for tasks such as classification, uncertainty estimation and test-time adaptation~\citep{baumann2024post,morales2024bayesadapter}.
+Moreover, assuming Gaussian structure makes quantities such as entropy, likelihood and KL divergences available in closed form, which underpins density-based diagnostics \citep{lee2018simple,betser2025whitened}.
+These benefits are already exploited in applied work, with recent studies empirically observing and leveraging approximate Gaussian behavior in self-supervised representations \citep{baumann2024post,balestriero2025gaussian,betser2025general}.
+Yet, despite these developments, a principled population-level explanation of why contrastive objectives such as InfoNCE give rise to Gaussian structure in representation space remains lacking.
+
+Analyzing the \emph{population} InfoNCE objective, we formalize the emergence of asymptotically Gaussian representations through two complementary analytical routes.
+A key ingredient is a novel alignment bound based on Hirschfeld-Gebelein-Rényi (HGR) maximal correlation, which limits achievable alignment according to augmentation mildness (Sec.~\ref{sec:align_bound}).
+In the \emph{empirical idealization route}, motivated by empirical training dynamics, alignment reaches a plateau and the objective reduces to a constrained uniformity problem on the hypersphere; combined with norm concentration, this yields Gaussian structure for both normalized (to a unit norm) and unnormalized representations (Sec.~\ref{sec:gauss-plateau}).
+In the \emph{regularized route}, a population-level analysis shows that adding a vanishing convex regularizer prioritizes the isotropic solution, yielding the same asymptotic Gaussian behavior without relying on training dynamics (Sec.~\ref{sec:gaus_reg}).
+Together, these analyses shed light on why Gaussian structure can emerge under the InfoNCE objective at the population level.
+
+We complement our theoretical analysis with empirical studies on synthetic data and CIFAR-10~\citep{krizhevsky2009learning} images, using encoders of increasing complexity: linear layers, MLPs with nonlinear activations, and ResNet-18~\citep{he2016deep}.
+By comparing contrastive and supervised training, we isolate the role of the training objective, beyond effects of data or architecture.
+We further observe similar Gaussian statistics in representations learned by general self-supervised foundation models, including DINO~\citep{caron2021emerging}, motivating a broader examination of Gaussian structure across self-supervised objectives.
+Our \textbf{main contributions} are:
+
+\begin{itemize}[leftmargin=1.25em, nosep]
+\item \textbf{Bounded alignment.}  
+In the large-batch limit, the alignment induced by the InfoNCE objective is bounded by the strength of the data augmentations.
+
+\item \textbf{Uniformity on the sphere.} 
+Along both routes we analyze, normalized representations converge toward the uniform distribution on the unit sphere.
+
+\item \textbf{Asymptotic Gaussian structure.}  
+Within this framework, both normalized and unnormalized representations admit asymptotically Gaussian behavior under the InfoNCE objective.
+
+\item \textbf{Empirical support.}  
+Accompanying our asymptotic analysis, we provide finite-dimensional empirical evidence on synthetic and real data, illustrating the emergence of Gaussian behavior across multiple settings and encoder architectures.
+
+\end{itemize}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.75\linewidth]{figures/teaser.jpg}
+    \caption{\textbf{Illustration.} Contrastive learning yields (approximately) Gaussian representations.}
+    \label{fig:teaser}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Related Work}
+\label{sec:related}
+\paragraph{Contrastive learning and InfoNCE.}
+The InfoNCE loss~\citep{oord2018representation} is the standard objective in self-supervised representation learning and underlies methods such as SimCLR~\citep{chen2020simple}, MoCo~\citep{he2020momentum}, and CLIP~\citep{radford2021learning}.
+It balances alignment of positive pairs with batch-wise repulsion that promotes uniformity in representation space~\citep{wang2020understanding,chen2021exploring}.
+Prior work has studied these effects from geometric and optimization perspectives, identifying phenomena such as hyperspherical uniformity and feature concentration~\citep{chen2021exploring,caron2021emerging,draganov2025importance}.
+Other empirical studies model contrastive representations as approximately Gaussian~\citep{baumann2024post,morales2024bayesadapter}.
+However, the probabilistic law induced by the InfoNCE objective itself remains theoretically unexplained.
+
+\paragraph{Isotropy and Gaussian structure.}
+Several works aim to promote isotropic or Gaussian-like representations through explicit regularization or architectural design, including whitening-based objectives, variance-covariance control, and neural collapse phenomena~\citep{ermolov2021whitening,papyan2020prevalence,bardes2022vicregl}.
+Related self-supervised approaches based on joint-embedding predictive architectures (JEPA) also yield highly regular representations and have been shown to encode density-related structure that can be exploited with Gaussian models~\citep{assran2023self,bardes2024revisiting,balestriero2025gaussian, balestriero2025lejepa}.
+However, these works primarily observe or exploit Gaussian-like structure rather than explain its origin. Our work instead shows how Gaussianity emerges directly from the population InfoNCE objective.
+
+\paragraph{Hyperspherical geometry and Gaussianity.}
+A classical body of work studies the geometry of high-dimensional uniform measures on the sphere and their connection to Gaussian distributions \citep{vershynin2018high,wegner2021lecture}.
+Related geometric ideas also appear in hyperspherical variational families and radial Bayesian priors, which leverage approximately uniform distributions over the hypersphere \citep{davidson2018hyperspherical,farquhar2020radial}.
+A central result in this literature is the Maxwell-Poincar\'e spherical central limit theorem, which shows that fixed-dimensional projections of the uniform distribution on $\mathbb{S}^{d-1}$ converge to a Gaussian as the dimension grows \citep{maxwell1860ii,poincare1912calcul,diaconis1987dozen}.
+Although developed independently of contrastive learning, these results provide the mathematical basis for why spherical uniformity induces Gaussian structure in high-dimensional representations. Our analysis connects this classical theory to contrastive learning by identifying regimes in which the InfoNCE objective induces such uniformity.
+
+\paragraph{Additional theoretical perspectives.}
+Complementary lines of work study theoretical properties of representations learned with contrastive objectives.
+Identifiability analyses characterize when latent variables or semantic factors can be uniquely recovered under structural assumptions on the data-generating process~\citep{hyvarinen2016unsupervised,hyvarinen2019nonlinear,zimmermann2021contrastive,roeder2021linear, reizinger2024cross}; these results concern conditional or component-level structure and do not make claims about the marginal distribution of representations.
+Separately, task-driven analyses establish class separability or clustering guarantees for contrastive representations~\citep{saunshi2019theoretical,haochen2021provable}, focusing on class-conditional geometry rather than the overall distribution. Concretely, class-specific clusters may remain well separated even when the overall embedding distribution is approximately Gaussian.
+Our work does not address recovery or class structure; instead, it analyzes the marginal distribution induced by the population InfoNCE objective.
+
+\section{Setup}
+\label{sec:setup}
+
+\paragraph{Data domain.}
+Let $(\mathcal X,\mathcal{B}(\mathcal{X}))$ be a standard Borel space (a standard setting in probability) with a base probability $p_{\mathrm{base}}$.  
+We draw $X_0\sim p_{\mathrm{base}}$ as a single data item (e.g., an image).  
+%
+
+\paragraph{Pairs via augmentation.}  
+Contrastive learning is built around pairs of related examples rather than individual samples. 
+To form such pairs, we use an \emph{augmentation channel} $\mathcal A$, which takes a base sample $X_0 \sim p_{\mathrm{base}}$ 
+and produces stochastic variations of it. Formally, given $X_0$, we draw two independent augmentations
+\begin{equation}
+\label{eq:augmentations}
+X, Y \;\sim\; \mathcal A(\cdot \mid X_0).
+\end{equation}
+Here $X$ and $Y$ are two views of the same underlying example (e.g., different crops or color jitter).
+We denote by $p_X$ the marginal distribution of a single augmentation and assume it is nonatomic (a mild technical condition achievable in practice by infinitesimal dither). $p_{XY}$ denotes the joint distribution of a pair of augmentations $(X,Y)$.
+
+\paragraph{InfoNCE loss.}
+Let $f:\mathcal X \to \R^d$, $d \ge 2$, be a Borel-measurable encoder that maps input data to representations.
+InfoNCE operates on $\ell_2$-normalized representations, defined as $\hat f(x) := f(x)/\|f(x)\|$ if $\|f(x)\|>0$, and $\hat f(x):=c_0$ for a fixed arbitrary $c_0\in\Sph^{d-1}$ otherwise.
+Given a batch of $N$ paired augmentations $\{(x_i,y_i)\}_{i=1}^N$ drawn i.i.d.\ from $p_{XY}$, define
+$u_i := \hat f(x_i)$ and $v_i := \hat f(y_i)$.
+The empirical InfoNCE loss is
+\begin{equation}
+\label{eq:infonce-empirical}
+\mathcal L_{\mathrm{InfoNCE}}
+= - \frac{1}{N} \sum_{i=1}^N 
+\log \frac{\exp\!\big(\tfrac{1}{\tau}\langle u_i, v_i\rangle\big)}
+{\sum_{j=1}^N \exp\!\big(\tfrac{1}{\tau}\langle u_i, v_j\rangle\big)},
+\end{equation}
+with a fixed temperature $\tau>0$. 
+Since $u_i$ and $v_j$ are unit-normalized, $\langle u_i,v_j\rangle$ equals cosine similarity. 
+The numerator measures the similarity of the \emph{positive} pair $(u_i,v_i)$. 
+The denominator compares each anchor $u_i$ to all candidates $\{v_j\}_{j=1}^N$, where $j\neq i$ serve as \emph{negatives}. 
+This softmax encourages $u_i$ to rank its true partner highest while remaining distinct from negatives, preventing collapse.
+
+
+\paragraph{Population InfoNCE.}  
+The empirical InfoNCE loss in \eqref{eq:infonce-empirical} depends on the batch size $N$.  
+As $N \to \infty$, the empirical averages converge to expectations. 
+% 
+Let 
+\begin{equation}
+\label{eq:marginals}
+\mu := \hat{f}_* p_X, 
+\qquad 
+\pi := (\hat f,\hat f)_* p_{XY},
+\end{equation}
+be the marginal distribution of representations and the joint distribution of positive pairs, respectively. 
+Here $\hat f_* p_X$ denotes the \emph{pushforward measure} of $p_X$ by $\hat f$, which is the distribution of $\hat{f}(X)$. 
+As shown by \citet[Theorem~1, Eq.~(2)]{wang2020understanding}, in the infinite-negatives limit {$N \to \infty$} the empirical InfoNCE loss (up to the additive $\log N$ term) converges to the following population functional.  
+With $\alpha=1/\tau$ for fixed $\tau>0$:
+\begin{equation}
+\label{eq:pop}
+\mathcal L(\mu,\pi)
+\;=\; -\alpha\, \E_{(u,v)\sim\pi}[u\!\cdot\! v] 
+\;+\; \Phi(\mu),
+\qquad 
+\Phi(\mu):= \E_{u\sim\mu}\,\log \E_{v\sim\mu} \exp\!\big(\alpha\, u\!\cdot\! v\big).
+\end{equation}
+The first term measures \emph{alignment} of positive pairs, while the second is a \emph{uniformity potential} depending only on $\mu$. 
+
+\subsection{Alignment bound}
+\label{sec:align_bound}
+We now introduce a new term that quantifies the degree of augmentation.
+The augmentation channel $\mathcal A$ limits how much positive-pair alignment can be induced.  
+We quantify this with the \emph{augmentation mildness} parameter
+\begin{equation}
+\label{eq:eta2}
+\eta_2
+\;:=\;
+\sup_{\substack{g\in L^2(p_X)\\ \Var(g)>0}}
+\frac{\Var\big(\E[g(X)\mid X_0]\big)}{\Var(g(X))}
+\ \in[0,1],
+\end{equation}
+which measures how predictable functions of the view $X$ are from the base $X_0$. 
+% 
+This quantity equals the squared Hirschfeld-Gebelein-Rényi (HGR) maximal correlation, denoted $\rho_m(X,X_0)$, i.e., $\eta_2=\rho_m^2(X,X_0)$~\citep{hirschfeld1935connection,gebelein1941statistische,renyi1959measures} (see Appendix~\ref{app:hgr:def}). Intuitively, \( \eta_2 = 0 \) when \( X \) is (effectively) independent of \( X_0 \) (very strong/noisy augmentations), and $\eta_2=1$ when $X$ is fully determined by $X_0$ (no augmentation noise).
+
+\textbf{Example.}
+Consider the Gaussian channel
+\( X = A X_0 + \sqrt{1 - A^2}\,\varepsilon \),
+where \( X_0 \sim \mathcal N(0,1) \) and \( \varepsilon \sim \mathcal N(0,1) \) are independent.
+In this case, $X$ and $X_0$ are jointly Gaussian with Pearson correlation $A$, the maximal correlation satisfies $\rho_m(X,X_0)=|A|$, and thus $\eta_2 = A^2$ (Appendix~\ref{app:hgr:gauss}).
+
+\begin{proposition}[Augmentation-controlled alignment bound]
+\label{prop:alignment-bound}
+Let \( X, Y \sim \mathcal A(\cdot \mid X_0) \) be conditionally independent given the base sample \( X_0 \), and let \( u = \hat f(X) \), \( v = \hat f(Y) \) be normalized representations in \( \Sph^{d-1} \), i.e., \( \|u\| = \|v\| = 1 \). Then
+\begin{equation}
+\label{eq:alignment_bound}
+\E_{(u,v)\sim\pi}[u \cdot v]\;\le\;\eta_2\;+\;(1-\eta_2)\,\|m(\mu)\|^2,
+\qquad
+m(\mu) := \E[u] = \E[v],
+\end{equation}
+where \( \eta_2 = \rho_m^2(X, X_0) \) is the squared HGR maximal correlation between the view and the base, and \( \mu \) is the marginal law of \( u \). 
+\end{proposition}
+
+\noindent The proof appears in Appendix~\ref{app:hgr:align-proof}. This bound links the alignment of positive pairs to the structure of the statistical dependence induced by the augmentation channel. 
+While HGR maximal correlation has been studied in statistical dependence analysis~\citep{huang2020sample,zhang2024hgr}, it has not previously been used to control alignment in contrastive learning. Existing work studies augmentations empirically (e.g., \citet{tian2020makes}) but does not derive bounds of this form.
+This result formalizes how the strength of data augmentations fundamentally constrains achievable alignment under the InfoNCE objective.
+
+\section{Gaussianity from InfoNCE}
+\label{sec:gauss-routes}
+
+We study why minimizing the population InfoNCE objective~\peqref{eq:pop} yields (approximately) Gaussian low-dimensional projections of learned representations, for both \emph{normalized} representations on the sphere and \emph{unnormalized} representations in $\R^d$. Our analysis proceeds along two complementary routes, which differ in the strength of the assumptions they require.
+
+\emph{Empirical idealization.}
+We first analyze an idealized regime with infinite data, ambient dimension $d \to \infty$, and sufficient optimization. Guided by empirical observations, we assume \emph{alignment plateau} and \emph{thin-shell concentration}; these assumptions enable a simple derivation of Gaussian projections.
+
+\emph{Regularized route.}
+To reduce reliance on training dynamics, we study a regularized variant of the population objective. Introducing a vanishing convex regularizer and assuming attainable alignment at uniformity ensures a unique minimizer and yields the same asymptotic Gaussian structure. This route provides an alternative explanation independent of training behavior.
+
+\subsection{Gaussian projections at alignment plateau}
+\label{sec:gauss-plateau}
+
+Proposition~\ref{prop:alignment-bound} provides an upper bound on achievable alignment. In the sequel we do not assume this bound is tight; instead, we model training as reaching a plateau that lies strictly below the bound.
+\begin{assumption}[Alignment plateau]
+\label{assump:plateau}
+After sufficient training, the positive-pair alignment saturates at a ceiling; concretely,
+\begin{equation}
+\label{eq:alignment-plateau}
+\E_{(u,v)\sim\pi}[u\!\cdot\! v]\;=\;\eta_2 \;+\;  r_{\mathrm{plat}},
+\end{equation}
+
+where $r_{\mathrm{plat}} \le 0$ is a constant error term representing the difference between the alignment value at plateau and the maximal correlation defined by the augmentations ($\eta_2$).
+\end{assumption}
+
+Empirically, alignment saturation has been reported in some contrastive-learning settings \citep{wang2020understanding}, which motivates considering a plateau model as a plausible scenario rather than a universal requirement. In our experiments (Fig.~\ref{fig:uni_align_violin}, Appendix Figs.~\ref{fig:uni_align_hist_b}, \ref{fig:uni_align_hist_d}), we frequently observe high alignment alongside improving uniformity with larger dimensions and batch sizes, suggesting that alignment may saturate before uniformity in at least some regimes. An extension that places the plateau exactly at the alignment bound \peqref{eq:alignment_bound} is discussed in Appendix~\ref{app:exact_align}.
+
+\begin{corollary}[Gaussian $k$-projections at the plateau]
+\label{cor:gauss-k-simple}
+Suppose the alignment plateau condition \peqref{eq:alignment-plateau} holds, and consider the population objective \peqref{eq:pop}.  
+Let $\mu^*$ denote the global minimizer supported on $\Sph^{d-1}$. Then, as $d \to \infty$, for every fixed $k \geq 1$ the $k$-dimensional marginal of $u \sim \mu^*$ satisfies
+\begin{equation}
+\label{eq:gauss-k-unif}
+\sqrt{d}\,u_k \;\Rightarrow\; \mathcal N(0, I_k),
+\end{equation}
+where $u_k$ denotes the projection of $u$ onto a fixed $k$-dimensional coordinate subspace and $I_k$ is the $k \times k$ identity matrix.
+\end{corollary}
+
+The proof is provided in Appendix~\ref{app:plateau_proof_norm} and follows from two lemmas. The first establishes that $\Phi(\mu)$ attains a global minimum at the uniform law \citep{wang2020understanding}, while the second invokes the central limit theorem on the sphere \citep{diaconis1987dozen} to deduce Gaussian projections.
+
+\subsubsection{Gaussian projections for unnormalized representations.}
+So far we analyzed normalized representations on the sphere. We now extend the result to the original, unnormalized encoder outputs $z=f(X)\in\R^d$.  
+Write $z = r u$, where $r=\|z\|$ is the representation radius and $u=z/\|z\|\in\Sph^{d-1}$ the normalized direction.
+
+\begin{assumption}[Thin-shell concentration]
+\label{assump:thin-shell}
+We assume the representation radius concentrates:
+\begin{equation}
+\label{eq:thin-shell}
+\frac{r}{r_0} \;\xrightarrow[d\to\infty]{}\; 1,
+\end{equation}
+where $r_0\in(0,\infty)$ is a deterministic constant.
+\end{assumption}
+
+Norm concentration is widely observed in contrastive learning: unnormalized representations cluster around a characteristic radius \citep{wang2020understanding,haochen2021provable,levi2024double}. This thin-shell effect~\citep{klartag2023logarithmic} is further promoted by weight decay, which penalizes norm growth and stabilizes a common scale. In particular, \citet{draganov2025importance} show that appropriate weight decay suppresses norm inflation and tightens the dispersion of representation norms, lending empirical support to Assumption~\ref{assump:thin-shell}. Consistent with these reports, our experiments exhibit progressively sharper radius histograms as dimension and batch size increase (Figs.~\ref{fig:laplace_gauss}, \ref{fig:cifar_curves}, \ref{fig:thin_shell}).
+
+\begin{proposition}[Gaussian projections for unnormalized representations]
+\label{prop:unnorm-unif}
+Let $z=f(x)\in\R^d$ be the unnormalized representation and $u:=z/\|z\|$. 
+Assume $u\sim\sigma$ (the uniform distribution on $\Sph^{d-1}$) and that Assumption~\ref{assump:thin-shell} holds, i.e., $r\xrightarrow[d\to\infty]{} r_0\in(0,\infty)$. 
+Then for any fixed $k$-dimensional subspace,
+\begin{equation}
+\label{eq:gauss-unnorm-unif}
+\sqrt{d}\,z_k \;\Rightarrow\; \mathcal N\!\big(0,\,r_0^2 I_k\big)
+\qquad (d\to\infty),
+\end{equation}
+where $z_k$ denotes the orthogonal projection of $z$ onto that subspace and $I_k$ is the $k\times k$ identity.
+\end{proposition}
+
+See proof in Appendix~\ref{app:plateau_proof_unnorm}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/violin_plots.jpg}
+    \caption{\textbf{Uniformity vs.\ alignment across settings.} A simple linear encoder trained on synthetic Laplace data exhibits (i) near-optimal alignment across all configurations and (ii) steadily improving uniformity as batch size or dimensionality grow.}
+    \label{fig:uni_align_violin}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\subsection{Gaussian projections using regularization}
+\label{sec:gaus_reg}
+
+Proposition~\ref{prop:alignment-bound} shows that alignment is limited by the augmentation channel \eqref{eq:alignment_bound}.
+At the uniform distribution ($\mu=\sigma$) the mean vanishes, $m(\sigma)=0$, and the bound reduces to $\E[u\!\cdot\! v] \le \eta_2$.  
+Assuming this ceiling is attainable at uniformity, the uniform distribution becomes asymptotically optimal for the population objective.
+We work in a regularized setting, where the regularization vanishes as $d\to \infty$. As before, this has direct implications to the representation projections, which are approximately Gaussian (Theorem~\ref{thm:conv_rate}). This result shows that Gaussianity can be obtained without relying on the stronger thin-shell or plateau conditions.
+
+We constrain $f$ to take values in $B\subseteq\R^d$, which is either some closed ball centered at $0$ with positive radius or $\R^d$. 
+We take the original loss and add two new losses: one to penalize large squared norms, and the other to encourage high entropy (we comment that both are commonly regarded as desirable goals, irrespective of our setup). Specifically, for fixed $\beta,\lambda>0$,
+\begin{equation}
+\label{eq:angkl}
+J(f)
+=\Phi(\mu)-\alpha\E_{(u,v)\sim\pi}[u\cdot v]
++\beta(-H(\rho)+\lambda\E_{Z\sim\rho}\|Z\|^2)\;,
+\end{equation}
+where $\rho = f_*p_X$ is the unnormalized pushforward probability. Define the truncated Gaussian $\gamma_\lambda^B$,
+\begin{equation}
+\gamma_\lambda^{B}(dz)=c_{B,\lambda}e^{-\lambda\|z\|^2}\mathbf 1_{B}(z)dz\;,\qquad
+c_{B,\lambda}^{-1}=\int_{B}e^{-\lambda\|z\|^2}\,dz\;.
+\end{equation}
+If $\rho\ll \gamma_\lambda^{B}$ ($\ll$ denotes absolute continuity, so $\rho$ is absolutely continuous with respect to $\gamma_\lambda^{B}$), then
+\begin{equation}
+\KL(\rho\|\gamma_\lambda^{B})
+=\int \log\frac{d\rho}{dz}\,d\rho-\int\log\frac{d\gamma_\lambda^{B}}{dz}\,d\rho
+=-H(\rho)\;+\;\lambda\,\E_\rho\|Z\|^2\;+\;\log c_{B,\lambda}^{-1}\;,
+\end{equation}
+that is, equality up to an additive constant. Since $\rho(B)=1$, if $\rho\not\ll \gamma_\lambda^{B}$, then both $\KL(\rho\|\gamma_\lambda^{B})$ and $-H(\rho)$ are $+\infty$. 
+Thus, it is equivalent to minimize 
+\begin{equation}\label{eq:with kl1}
+J(f)
+=\Phi(\mu)-\alpha\E_{(u,v)\sim\pi}[u\cdot v]
++\beta \KL(\rho\|\gamma_\lambda^{B})\;,
+\end{equation}
+and we thereby also implicitly restrict $\rho$ to satisfy $\rho\ll \gamma_\lambda^{B}$ and in particular $\rho(B)=1$.
+
+\ignore{
+
+}
+
+Our goal is to prove that for $\beta\geq \beta_0$, taking the angular probability as $\sigma$ approaches optimality and the optimal radial probability is that of $\gamma_\lambda^B$. If $B=\R^d$, this means that a Gaussian $\rho$ approaches optimality. Furthermore, as $d\to\infty$, $\beta_0\to 0$.
+
+This will be done in several steps.
+First, $\rho$ can be decomposed into a radial part and an angular part. We show that the radial part can be chosen optimally in a straightforward way. 
+
+\begin{proposition}\label{prop:radial optimal}
+ Let $\rho(dz)=\mu(du)\kappa(dr\mid u)$ and $\gamma_\lambda^{B}(dz)=\sigma(du)\xi(dr\mid u)$ in polar coordinates $z=ru$. Then $\kappa = \xi$ is an optimal choice, yielding $\KL(\rho\Vert\gamma_\lambda^{B})=\KL(\mu\Vert\sigma)$. 
+ \end{proposition}
+
+The proof is given in Appendix~\ref{app:reg_prop_proof}. The above proposition reduces the optimization problem for unnormalized embedding to normalized embeddings only. It also describes an optimal probability for embedding norms, in contrast to the original InfoNCE loss, which is completely oblivious to embedding norms. 
+
+It is important to note that because we are working with a standard Borel space with a nonatomic $p_X$, any probability $\rho\in \mathcal{P}(B)$ has $\rho = g_*p_X$ for some encoding $g$. In addition, any $\mu\in\mathcal{P}(\Sph^{d-1})$ has $\mu = h_*p_X$ for some encoding, and since $B$ contains a ball around $0$, there is an encoding $f$ s.t. $h=\hat{f}$. Thus we can legitimately speak about ``choosing'' $\rho$ or $\mu$, since suitable encodings exist that induce them. In addition, we may also define:
+
+\begin{definition}
+For every $\mu\in\mathcal{P}(\Sph^{d-1})$,
+\begin{equation}
+\mathrm{Align}(\mu)=\sup_f\big\{\ \E[\hat f(X)\cdot\hat f(Y)]:f\text{ measurable},\ (\hat f)_*p_X=\mu\ \big\}\;,
+\end{equation}
+\end{definition}
+As was noted, the supremum is always taken on a nonempty set. 
+We can write
+\begin{equation}\label{eq:with kl2}
+\tilde{J}(\mu)
+=\Phi(\mu)-\alpha\mathrm{Align}(\mu)
++\beta \KL(\mu\|\sigma)\;,
+\end{equation}
+and it holds that $\inf_{\{\hat{f}:\hat{f}_*p_X = \mu\}} J(f) = \tilde{J}(\mu)$, and consequently $\inf_f J(f) = \inf_{\mu\in \mathcal{P}(\Sph^{d-1})}\tilde{J}(\mu)$.
+
+% 
+%     
+%
+% 
+% 
+%   
+% 
+%
+The reason is that $\mathrm{Align}(\mu)$ can be approximated arbitrarily well by an encoding, and the $\KL$ divergence is optimized by taking the radial distribution given in Proposition~\ref{prop:radial optimal}. We can therefore focus on optimizing $\tilde{J}(\mu)$. 
+
+The assumption for which we will prove our result is the following:
+
+\begin{assumption}
+\label{assump:alignment}
+It holds that  $\alpha(\eta_2 - \mathrm{Align}(\sigma))\xrightarrow{d\to\infty} 0$.
+
+
+\end{assumption}
+We will require one more technical lemma before proceeding to prove the result.
+\begin{lemma}\label{lem:lb_kl}
+If $d\geq 2$, then $\KL(\mu\Vert\sigma)\geq C(d-1)\|m(\mu)\|^2$, where $C>0$ is a universal constant.
+\end{lemma}
+Proof is provided in Appendix~\ref{app:reg_lem_proof}. To understand the constant, see \citep[Proposition~2.6.1]{vershynin2018high}.
+
+\begin{theorem}\label{thm:regularized main}
+    Let $d\geq 2$. There is a universal constant $C>0$ s.t. for $\beta \geq \beta_0 = \frac{\alpha(1-\eta_2)}{C(d-1)}$,
+    \begin{itemize}
+        \item 
+        Under Assumption~\ref{assump:alignment}, $\tilde{J}(\sigma)- \inf_\mu\tilde{J}(\mu)\xrightarrow{d\to\infty} 0$.
+        \item 
+        Assuming further that $\mathrm{Align}(\sigma)=\eta_2$ yields that $\tilde{J}(\sigma) = \min_{\mu}\tilde{J}(\mu)$.        
+    \end{itemize}
+    
+    % 
+    % 
+    Moreover, as $d\to\infty$, $\beta_0\to 0$.
+\end{theorem}
+
+\begin{proof}   
+Write $\delta(d) = \eta_2 - \mathrm{Align}(\sigma)$. For every $\mu$, we have that $\Phi(\mu)-\Phi(\sigma)\geq 0$ \citep[Theorem~1]{wang2020understanding}. In addition, 
+\begin{equation}
+    \mathrm{Align}(\mu)-\mathrm{Align}(\sigma)\leq \eta_2 + (1-\eta_2)\|m(\mu)\|^2 - (\eta_2-\delta(d))=(1-\eta_2)\|m(\mu)\|^2 +\delta(d)
+\end{equation}
+by Proposition~\ref{prop:alignment-bound}. Lastly,
+\begin{equation}
+    \KL(\mu\|\sigma)-\KL(\sigma\|\sigma)=\KL(\mu\|\sigma)\geq C(d-1)\|m(\mu)\|^2
+\end{equation}
+by Lemma~\ref{lem:lb_kl}. Therefore,
+\begin{align}\nonumber
+\tilde{J}(\mu)-\tilde{J}(\sigma)
+&= \left(\Phi(\mu)-\Phi(\sigma)\right) -\alpha(\mathrm{Align}(\mu)-\mathrm{Align}(\sigma))+\beta(\KL(\mu\|\sigma)-\KL(\sigma\|\sigma))\\\nonumber
+&\geq -\alpha(1-\eta_2)\|m(\mu)\|^2-\alpha\delta(d)+\beta C(d-1)\|m(\mu)\|^2\\
+&= \left(-\alpha(1-\eta_2)+\beta C(d-1)\right)\|m(\mu)\|^2-\alpha\delta(d)\geq -\alpha\delta(d)\;,
+\end{align}
+where the last inequality is by the choice of $\beta$. 
+
+
+
+If we assume that $\alpha\delta(d)\xrightarrow{d\to\infty} 0$, then $\tilde{J}(\sigma)-\inf_\mu\tilde{J}(\mu)\leq \alpha\delta(d)$, so $\tilde{J}(\sigma)- \inf_\mu\tilde{J}(\mu)\xrightarrow{d\to\infty} 0$.
+
+If we assume further that $\mathrm{Align}(\sigma)=\eta_2$, then $\delta(d)=0$, and since $\tilde{J}(\sigma)\leq \tilde{J}(\mu)$ for every $\mu$, $\tilde{J}(\sigma)=\min_{\mu} \tilde{J}(\mu)$, completing the proof. 
+\end{proof}
+Since the optimal radial component of the distribution is known, we can draw conclusions w.r.t. $\rho$ as well. For example, we can directly obtain the following corollary. 
+\begin{corollary}\label{cor:unnormalized is gaussian}
+Let $B=\R^d$ ($d\geq 2$) and $\beta\geq\beta_0$. If $\mathrm{Align}(\sigma)=\eta_2$, where $\sigma$ is the uniform distribution on $\Sph^{d-1}$ and $\eta_2$ is the augmentation mildness, then $\mathcal{N}(0,(2\lambda)^{-1}I_d)$ is an optimal choice for $\rho$.
+\end{corollary}
+
+\ignore{%
+}
+\ignore{
+
+}
+
+
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+
+% 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+% 
+%     
+%     
+%     
+%     
+%    
+%    
+%    
+%    
+% 
+
+\section{Experiments}
+\label{sec:exp}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/laplace_gauss_measures.jpg}
+    \caption{\textbf{Synthetic data experiments.}
+Left: representation norm statistics vs.\ batch size (curves denote dimension), showing thin-shell concentration with increasing $d$ and $N$.
+Top middle/right: norm histograms illustrating radius tightening.
+Bottom: normality diagnostics (AD, DP), with averages in the Gaussian acceptance range.}
+
+    \label{fig:laplace_gauss}
+\end{figure*}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+We empirically evaluate the distributional geometry of representations learned with the InfoNCE objective.
+The experiments are designed to test three theoretical predictions:  
+(i) concentration of representation norms on a thin shell,  
+(ii) emergence of Gaussian low-dimensional projections, and  
+(iii) the dependence of these phenomena on contrastive learning.
+
+We consider three settings of increasing complexity: synthetic data with linear encoders, CIFAR-10 with both contrastive and supervised training, and pretrained foundation-scale models.
+In all cases, we analyze both \emph{normalized} and \emph{unnormalized} representations.
+All reported trends are stable across runs; figures show representative seeds, with full implementation details in Appendix~\ref{app:impl}.
+
+\noindent \textbf{Metrics.}
+We quantify Gaussian structure using complementary diagnostics targeting radial and coordinate-wise behavior.
+To assess norm concentration, we measure the coefficient of variation (CV) of representation norms:
+
+\begin{equation}
+\label{eq:cv-radius}
+\mathrm{CV}
+=
+\frac{\operatorname{std}\!\bigl(\{\lVert z_i\rVert\}_{i=1}^N\bigr)}
+     {\operatorname{mean}\!\bigl(\{\lVert z_i\rVert\}_{i=1}^N\bigr)} .
+\end{equation}
+
+$z_i$ are the learned representations and $N$ is the number of samples. A small CV indicates concentration of $\|z_i\|$ around a characteristic radius, consistent with thin-shell behavior.
+
+To evaluate Gaussianity of low-dimensional projections, we apply two standard one-dimensional normality tests to individual coordinates:
+(i) the Anderson-Darling (AD) test~\citep{anderson1954test}, where AD $< 0.752$ corresponds to failure to reject normality, and
+(ii) the D’Agostino-Pearson (DP) test~\citep{d1973tests}, where $p>0.05$ indicates failure to reject the Gaussian hypothesis.
+These tests probe marginal normality of fixed coordinates, as predicted by the spherical central limit theorem.
+
+Taken together, CV captures global radial structure, while AD and DP test coordinate-level Gaussianity.
+This combination provides a strong finite-sample indicator of approximate Gaussian behavior and provides evidence against common heavy-tailed or mixture alternatives, which typically fail at least one of these diagnostics.
+
+
+\textbf{Synthetic data experiments}.
+We begin with controlled synthetic settings to validate our diagnostics and isolate the mechanisms predicted by the theory.
+We consider three synthetic data distributions: (i) an i.i.d. Laplace$(0,1)$ distribution, (ii) a Gaussian mixture with 25 equally weighted components and random means, and (iii) a fully discrete sparse binary distribution (1024-dimensional vectors). Each dataset contains 10k samples, and we train linear encoders using InfoNCE while varying the representation dimension and batch size.
+In addition, we explicitly track alignment and uniformity as functions of batch size and dimension (Fig.~\ref{fig:uni_align_violin}) to probe the saturation behavior predicted by our Assumption \ref{assump:plateau}.
+% 
+
+Figure~\ref{fig:laplace_gauss} shows that, for Laplace inputs, representation norms progressively concentrate as both batch size and dimension increase, evidenced by a monotonic decrease in the coefficient of variation (CV). Norm histograms further illustrate the emergence of thin-shell concentration.
+Normality diagnostics (AD and DP) indicate that individual coordinates fall well within Gaussian acceptance thresholds, with perfect per-coordinate compliance (Table~\ref{table:gaussian_core}).
+
+Across all three synthetic settings, including strongly non-Gaussian mixture inputs, the learned representations exhibit low norm variation and strong coordinate-wise Gaussianity (Table~\ref{table:gaussian_core}), indicating that marginal Gaussian structure emerges independently of the input distribution. The same phenomenon is observed for the fully discrete binary dataset: although representations are initially far from Gaussian, training drives pronounced norm concentration and coordinate-wise normality. Since this distribution admits no invertible mapping to a continuous Gaussian, the observed structure cannot be explained by latent Gaussian recovery.
+
+In parallel, alignment quickly approaches a stable ceiling determined by the augmentation channel (Fig.~\ref{fig:uni_align_violin}), while uniformity continues to improve. This behavior is consistent with the saturation route and the emergence of isotropic Gaussian structure in high dimension. Together, these controlled experiments support the assumptions underlying our theoretical analysis and motivate the study of Gaussianity in more realistic settings.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{table}[b]
+\centering
+\caption{\textbf{Gaussianity diagnostics across data and training settings.}
+We report norm concentration (CV) and Gaussianity via AD and DP tests (average statistic and fraction of compliant coordinates).
+Lower AD and higher DP indicate closer Gaussian agreement.
+Binary E0/E50/E100 denote evaluation at epochs 0/50/100; other results are from the end of training.
+Results use unnormalized embeddings.}
+\label{table:gaussian_core}
+
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.1}
+
+\begin{adjustbox}{width=\linewidth}
+\begin{tabular}{|l||cc|ccc||cc|}
+\hline
+\multirow{2}{*}{\textbf{Metric}}
+& \multicolumn{5}{c||}{\textbf{Synthetic (Linear)}} 
+& \multicolumn{2}{c|}{\textbf{CIFAR-10 (ResNet-18)}} \\
+\cline{2-8}
+
+& \textbf{Laplace} & \textbf{GMM}
+& \textbf{Binary E0} & \textbf{E50} & \textbf{E100}
+& \textbf{Supervised} & \textbf{Contrastive} \\
+\hline\hline
+
+CV 
+& 0.08 & 0.08 
+& 0.36 & 0.12 & 0.09
+& 0.5 & 0.09 \\
+
+AD Avg. ($<0.752$) 
+& 0.38 & 0.39 
+& 1.64 & 0.41 & 0.42
+& 3.3 & 0.43 \\
+
+AD Norm. Feat. 
+& 100\% & 100\% 
+& 30\% & 93\% & 97\%
+& 6.2\% & 96.1\% \\
+
+DP Avg. ($>0.05$) 
+& 0.49 & 0.46 
+& 0.02 & 0.44 & 0.46
+& 0.041 & 0.39 \\
+
+DP Norm. Feat. 
+& 100\% & 100\% 
+& 15\% & 89\% & 98\%
+& 3.9\% & 94.5\% \\
+
+\hline
+
+\textbf{Gaussian?} 
+& \textcolor{green!60!black}{$\checkmark$} 
+& \textcolor{green!60!black}{$\checkmark$}
+& \textcolor{red}{$\times$} 
+& \textcolor{green!60!black}{$\checkmark$} 
+& \textcolor{green!60!black}{$\checkmark$}
+& \textcolor{red}{$\times$} 
+& \textcolor{green!60!black}{$\checkmark$} \\
+
+\hline
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.85\linewidth]{figures/cifar_epochs_100.jpg}
+    \caption{\textbf{CIFAR-10 training dynamics.}  
+    A two-layer MLP trained with InfoNCE on CIFAR-10 exhibits increasing Gaussianity over training.  
+    Left: representation norms concentrate as indicated by declining CV \peqref{eq:cv-radius}.  
+    Middle: the AD statistic decreases from non-Gaussian levels into the normal range.  
+    Right: the fraction of coordinates passing the DP normality test rises steadily.}
+    \label{fig:cifar_curves}
+\end{figure*}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\noindent \textbf{CIFAR-10 experiments.}
+We next study whether Gaussian structure emerges in a realistic vision setting.
+We train a two-layer MLP with a single ReLU nonlinear activation using the InfoNCE objective on CIFAR-10, and evaluate representations on the test set throughout training.
+
+Figure~\ref{fig:cifar_curves} shows consistent trends across training: 
+representation norms concentrate over time, as indicated by a steadily decreasing CV; 
+the AD statistic drops from non-Gaussian levels into the normal regime; 
+and the fraction of coordinates passing the DP test increases monotonically.
+These dynamics illustrate the joint emergence of thin-shell concentration and coordinate-wise Gaussianity as optimization progresses.
+These trends mirror the synthetic setting and show that norm concentration and Gaussianity also emerge in realistic contrastive training.
+
+\noindent \textbf{Contrastive vs.\ supervised training.}
+To isolate the role of the training objective, we compare supervised and contrastive learning using the same ResNet-18 architecture on CIFAR-10, following the SimCLR training protocol.
+Both models share identical initialization and capacity, differing only in the objective: cross-entropy supervision versus InfoNCE.
+As shown in Table~\ref{table:gaussian_core}, supervised training yields representations with high norm variability and strong deviations from Gaussianity, with most coordinates failing both AD and DP tests.
+In contrast, InfoNCE training produces concentrated norms and near-Gaussian per-coordinate distributions.
+These results indicate that the emergence of Gaussian structure is not explained by the data or architecture alone, but is also a direct consequence of the contrastive objective.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{table*}[htb]
+\centering
+\caption{\textbf{Gaussianity diagnostics for pretrained models.}
+Coordinate-wise Gaussianity via AD and DP tests (average statistic and fraction of compliant coordinates).
+Test thresholds are indicated in headers.
+Results shown for \textit{Unnormalized} / \textit{Normalized} embeddings.}
+\label{table:gaussian_pretrained}
+
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.1}
+
+\begin{adjustbox}{width=\linewidth}
+\begin{tabular}{|l|l||cc||cc|c|}
+\hline
+\multirow{2}{*}{\textbf{Training}} 
+& \multirow{2}{*}{\textbf{Model (Test data)}} 
+& \multicolumn{2}{c||}{\textbf{AD ($<0.752$)}} 
+& \multicolumn{2}{c|}{\textbf{DP ($>0.05$)}} 
+& \multirow{2}{*}{\textbf{Gaussian?}} \\
+\cline{3-6}
+
+& 
+& \textbf{Avg.} & \textbf{Norm. Feat. (\%)} 
+& \textbf{Avg.} & \textbf{Norm. Feat. (\%)} & \\
+\hline\hline
+
+\multirow{2}{*}{Supervised}
+& ResNet-34 (MS-COCO)         & 10.01 / 9.638 & 0.0\% / 0.0\% & $2.2\!\times\!10^{-6}$ / $3.2\!\times\!10^{-6}$ & 0.0\% / 0.0\% & \textcolor{red}{$\times$} \\
+& DenseNet (MS-COCO)          & 2.982 / 2.8538 & 42.2\% / 41.6\% & 0.1550 / 0.1442 & 49.3\% / 49.0\% & \textcolor{red}{$\times$} \\
+\hline
+
+\multirow{5}{*}{Self-supervised}
+& DINO (MS-COCO)              & 0.44 / 0.44 & 97.0\% / 97.1\% & 0.45 / 0.45 & 99.2\% / 99.3\% & \textcolor{green!60!black}{$\checkmark$}\\
+& CLIP (Image, MS-COCO)        & 0.47 / 0.49 & 96.8\% / 96.0\% & 0.42 / 0.39 & 99.6\% / 99.4\% & \textcolor{green!60!black}{$\checkmark$}\\
+& CLIP (Text, MS-COCO)         & 0.53 / 0.54 & 94.0\% / 93.6\% & 0.38 / 0.38 & 99.4\% / 99.7\%   & \textcolor{green!60!black}{$\checkmark$}\\
+& CLIP (Image, Sketch)    &  0.4 / 0.4  &  94.8\% / 94.7\% &  0.44 / 0.42 &  93.3\% / 93.2\% & \textcolor{green!60!black}{$\checkmark$}\\
+& CLIP (Image, Painting)  &  0.41 / 0.42 &  95.3\% / 95.1\% &  0.43 / 0.4 &  94.2\% / 93.9\% & \textcolor{green!60!black}{$\checkmark$}\\
+
+\hline
+
+\end{tabular}
+\end{adjustbox}
+\end{table*}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\noindent \textbf{Pretrained models.}
+We further examine whether Gaussian structure persists in large pretrained representations.
+On the MS-COCO validation set~\citep{lin2014microsoft}, we compare self-supervised backbones CLIP (ViT-L/14 image and text encoders)~\citep{radford2021learning} and DINO (ViT-B/32)~\citep{caron2021emerging} against supervised ImageNet-pretrained~\citep{deng2009imagenet}, ResNet34~\citep{he2016deep}, and DenseNet~\citep{huang2017densely}.
+Normality diagnostics (Table~\ref{table:gaussian_pretrained}) show that self-supervised models exhibit near-Gaussian coordinate distributions, while supervised models deviate substantially.
+We further evaluate the CLIP image encoder on ImageNet-R (Sketch and Painting domains) to test robustness beyond natural images, and again observe strong Gaussian signatures.
+Although CLIP and DINO are not exact instances of the unimodal InfoNCE setting, these diagnostics suggest that similar isotropic Gaussian-like statistics may arise broadly in self-supervised objectives.
+
+\section{Discussion and Conclusion}
+We showed that InfoNCE trained representations admit an asymptotic Gaussian law, via two routes: an alignment-plateau analysis with thin-shell concentration, and a regularized surrogate with milder assumptions.  
+Experiments on synthetic data, CIFAR-10, and pretrained models (MS-COCO and ImageNet-R) are consistent with these assumptions and the Gaussian hypothesis, revealing norm concentration, alignment saturation, and near-Gaussian projections. These results indicate that the Gaussian convergence remains informative well before the infinite-dimensional limit.
+This Gaussian view justifies common modeling choices (e.g., likelihood scoring, OOD detection) and suggests that explicit isotropy promoting regularizers may act as principled surrogates for InfoNCE’s implicit bias.  
+However, \emph{limitations} remain: our results are asymptotic, relying on high-dimensional limits and idealized assumptions that may not capture all practical regimes. 
+We therefore view our asymptotic framework as a principled starting point rather than a complete description of all practical regimes.
+% 
+% 
+For finite dimension $d$ and batch size $N$, projections are close to Gaussian, with deviations vanishing as $d,N\to\infty$. Quantitative bounds follow from classical Berry-Esseen \citep{vershynin2018high} rates in high dimension and uniform laws of large numbers for empirical objectives \citep{wellner2013weak}. In particular, the minimizer of the empirical InfoNCE loss deviates from the population minimizer by $O(N^{-1/2})$ according to \citet[Thm. 1]{wang2020understanding}, and the distribution of fixed-$k$ projections deviates from Gaussian by $O(d^{-1})$ according to \citet{diaconis1987dozen} (see Theorem~\ref{thm:conv_rate} in Appendix~\ref{app:plateau_proof_norm}). 
+Thus, for large but finite $d,N$, the Gaussian limit provides a representative and empirically useful approximation.
+% 
+In addition, we do not analyze optimization dynamics or prove that training attains these minimizers in practice; our results are asymptotic and characterize the population optima under the stated assumptions.
+Overall, we provide a principled asymptotic explanation for Gaussianity in contrastive representations, grounding empirical observations and opening new directions for analysis and practical design.  
+
+\section*{Ethics Statement}
+This work is theoretical and empirical in nature, focused on understanding the statistical behavior of representations trained with contrastive learning.  
+We do not foresee direct negative societal impacts.  
+Potential downstream applications of Gaussian modeling (e.g., density estimation, OOD detection) could influence decisions in safety-critical domains, and care must be taken to ensure robustness and fairness.  
+
+\section*{Reproducibility}
+We provide detailed descriptions of theoretical assumptions, proofs, and experimental protocols.  
+Datasets (synthetic data, CIFAR-10 \citep{krizhevsky2009learning}, and MS-COCO \citep{lin2014microsoft}) are publicly available.  
+Architectures, hyperparameters, and training settings are fully specified (Appendix~\ref{app:impl}), and to ensure reproducibility, code for the experiments is released \href{https://github.com/rbetser/InfoNCE-induces-Gaussian-distribution}{here}.
+
+\section*{Acknowledgments}
+We would like to acknowledge  
+support by the Israel Science Foundation (Grant 1472/23) and by the Ministry of Innovation, Science and Technology (Grants No. 5074/22, 8801/25).
+
+\bibliography{references}
+\bibliographystyle{iclr2026_conference}
+
+\appendix
+
+\section*{LLM Usage}
+
+Portions of this manuscript, including text editing, reference search, ideation, mathematical derivations, and summarization, were assisted by a large language model.  
+The model was used interactively to refine exposition, suggest formulations, and check consistency of notation, but all results, proofs, and experiments were implemented and validated by the authors.  
+All mathematical claims, experimental details, and citations were independently verified.  
+No content was included without author review and approval.  
+
+\section*{Overview}
+This appendix provides complete proofs for all propositions, corollaries, lemmas, and theorems, along with additional derivations that did not fit in the main text. We also include supplementary experiments and implementation details. The appendices are organized as follows:
+
+\begin{enumerate}[label=\Alph*.]
+    \item Proof and details of the alignment bound (Sec.~\ref{app:hgr}).
+    \item Proofs of some regularization surrogate-related claims (Sec.~\ref{app:reg_proof}).
+    \item Proof of the alignment-plateau approach. These include general claims, some are used in the regularization surrogate proof as well (Sec.~\ref{app:plateau_proof}).
+    \item Discussion about exact alignment bound at plateau (Sec.~\ref{app:exact_align}). 
+    \item Experimental details (Sec.~\ref{app:exp}). 
+\end{enumerate}
+
+\section{HGR maximal correlation and the alignment bound}
+\label{app:hgr}
+
+\subsection{HGR Definition and basic properties}
+\label{app:hgr:def}
+The Hirschfeld-Gebelein-R\'enyi (HGR) maximal correlation \citep{hirschfeld1935connection,gebelein1941statistische,renyi1959measures} between random variables $X$ and $Y$ is
+\begin{equation}
+\label{eq:hgr-def}
+\rho_m(X,Y)\;:=\;\sup_{\substack{\E[\phi(X)]=\E[\psi(Y)]=0\\ \Var(\phi)=\Var(\psi)=1}}
+\E[\phi(X)\psi(Y)]\;\in[0,1].
+\end{equation}
+An equivalent “explained-variance’’ characterization \citep{gebelein1941statistische,renyi1959measures} is
+\begin{equation}
+\label{eq:hgr-var}
+\rho_m^2(X,Y)
+=\sup_{\substack{g\in L^2(p_X)\\ \Var(g(X))>0}}
+\frac{\Var\!\big(\E[g(X)\mid Y]\big)}{\Var(g(X))}.
+\end{equation}
+Here $p_X$ is the marginal law of $X$, and $L^2(p_X)$ denotes the square-integrable (measurable) functions of $X$ under $p_X$.
+The numerator is the variance explained by the optimal $L^2$ predictor $\E[g(X)\mid Y]$ and the denominator is its total variance. Hence, the ratio is a (generalized) coefficient of determination, i.e., the fraction of variance of $g(X)$ predictable from $Y$, in $[0,1]$.
+
+
+HGR satisfies a (multiplicative) data-processing inequality (DPI): if $X - Y - Z$ is a Markov chain, then
+\begin{equation}
+\label{eq:hgr-dpi}
+\rho_m(X,Z)\;\le\; \rho_m(X,Y)\,\rho_m(Y,Z)
+\quad\text{\citep{renyi1959measures}}.
+\end{equation}
+%
+Our representations are normalized ($u,v\in \Sph^{d-1}$), hence bounded and each coordinate is in $L^2$. See also the operator-theoretic interpretation in~\citep{anantharam2013maximal}.
+
+\subsection{Gaussian example}
+\label{app:hgr:gauss}
+
+If two random variables \(X\) and \(Y\) are jointly Gaussian, then the HGR maximal correlation between them equals the absolute value of their Pearson correlation coefficient: 
+\begin{equation}
+\label{eq:hgr-gaussian}
+\rho_m(X,Y) = |A|, \qquad A := \frac{\text{Cov}(X,Y)}{\sqrt{\Var(X)\Var(Y)}}.
+\end{equation}
+This is a special case where the supremum in the HGR definition is achieved by simple linear functions. More precisely, the optimal transformations are just standardized versions of \(X\) and \(Y\) themselves. In other words, nonlinear functions cannot increase correlation beyond the linear one when the joint distribution is Gaussian. This result is well established; see, for example, \citet{bryc2005maximum}.
+
+
+\subsection{Proof of the alignment bound}
+\label{app:hgr:align-proof}
+We prove the inequality
+\begin{equation}
+\label{eq:align-goal}
+\E[u \cdot v] \;\le\; \eta_2 \;+\; (1-\eta_2)\,\|m(\mu)\|^2 ,
+\end{equation}
+for normalized representations $u=\hat f(X)$ and $v=\hat f(Y)$ on $\Sph^{d-1}$, where $m(\mu):=\E[u]=\E[v]$ is their common mean.
+
+\paragraph{Step 1: mean-residual decomposition.}
+Since $u$ and $v$ share the same marginal $\mu$, their means coincide:
+\begin{equation}
+\label{eq:mean}
+m(\mu) \;:=\; \E[u] \;=\; \E[v].
+\end{equation}
+Define residuals
+\begin{equation}
+\label{eq:residuals}
+\tilde u \;:=\; u - m(\mu), 
+\qquad 
+\tilde v \;:=\; v - m(\mu),
+\end{equation}
+so that $\E[\tilde u]=\E[\tilde v]=0$. Expanding the inner product yields
+\begin{equation}
+\label{eq:decompose}
+\E[u \cdot v]
+\;=\; \E\big[(m(\mu)+\tilde u)\cdot(m(\mu)+\tilde v)\big]
+\;=\; \|m(\mu)\|^2 \;+\; \E[\tilde u \cdot \tilde v] .
+\end{equation}
+
+The cross terms vanish because $\E[\tilde u] = \E[\tilde v] = 0$, so
+\begin{equation}
+\label{eq:cross-vanish-1}
+\E[m(\mu) \cdot \tilde v] = m(\mu) \cdot \E[\tilde v] = 0,
+\end{equation}
+and
+\begin{equation}
+\label{eq:cross-vanish-2}
+\E[\tilde u \cdot m(\mu)] = \E[\tilde u] \cdot m(\mu) = 0.
+\end{equation}
+
+
+\paragraph{Step 2: bound the residual correlation via HGR.}
+Fix a coordinate $k\in\{1,\dots,d\}$ and set
+\begin{equation}
+\label{eq:coord-fns}
+g_k(X) \;:=\; \tilde u_k, 
+\qquad 
+h_k(Y) \;:=\; \tilde v_k .
+\end{equation}
+Then $\E[g_k(X)]=\E[h_k(Y)]=0$ and, by the Markov structure $X - X_0 - Y$\, the DPI for HGR maximal correlation gives
+\begin{equation}
+\label{eq:hgr-dpi-align}
+\rho_m(X,Y)\;\le\;\rho_m(X,X_0)\,\rho_m(X_0,Y)
+\;=\;\sqrt{\eta_2}\,\sqrt{\eta_2}
+\;=\;\eta_2,
+\end{equation}
+as in \citet{anantharam2013maximal}.
+
+\noindent
+For any real-valued, square-integrable functions \( g(X) \), \( h(Y) \) with zero mean, we can apply the definition of HGR maximal correlation from ~\eqref{eq:hgr-def} together with the Cauchy-Schwarz inequality to obtain:
+\begin{equation}
+\label{eq:hgr-cs-bound}
+\big|\E\big[g(X)\,h(Y)\big]\big|
+\;\le\; \rho_m(X,Y)\,\sqrt{\Var(g)\,\Var(h)}.
+\end{equation}
+This inequality holds even when \( g \) and \( h \) are not normalized, since any such functions can be rescaled to have unit variance. In our case, the random variables \( X \) and \( Y \) are conditionally independent given \( X_0 \), and identically drawn from the same augmentation channel \( \mathcal A(\cdot\mid X_0) \). Therefore, the Markov chain \( X \leftarrow X_0 \rightarrow Y \) holds, and the multiplicative data-processing inequality~\peqref{eq:hgr-dpi-align} gives:
+\begin{equation}
+\label{eq:hgr-xy-dpi}
+\rho_m(X,Y)\;\le\; \rho_m(X,X_0)\,\rho_m(Y,X_0) \;=\; \eta_2.
+\end{equation}
+Substituting \eqref{eq:hgr-xy-dpi} into \eqref{eq:hgr-cs-bound} yields:
+\begin{equation}
+\label{eq:hgr-final-bound}
+\big|\E\big[g(X)\,h(Y)\big]\big|
+\;\le\; \eta_2\,\sqrt{\Var(g)\,\Var(h)}.
+\end{equation}
+
+Applying \eqref{eq:hgr-final-bound} to $(g_k,h_k)$ and summing over coordinates,
+\begin{equation}
+\label{eq:sum-bound}
+\E[\tilde u \cdot \tilde v]
+\;=\; \sum_{k=1}^d \E[\tilde u_k \tilde v_k]
+\;\le\; \eta_2 \sum_{k=1}^d \sqrt{\Var(\tilde u_k)\Var(\tilde v_k)}
+\;\le\; \eta_2 \sqrt{\sum_{k=1}^d \Var(\tilde u_k)}\;\sqrt{\sum_{k=1}^d \Var(\tilde v_k)} ,
+\end{equation}
+where the last step is Cauchy-Schwarz for sequences.
+
+\paragraph{Step 3: compute the marginal variances.}
+Because $\|u\|=\|v\|=1$ and $m(\mu)=\E[u]=\E[v]$,
+\begin{equation}
+\label{eq:sumvar-u}
+\sum_{k=1}^d \Var(\tilde u_k)
+\;=\; \E\!\big[\|\tilde u\|^2\big]
+\;=\; \E\!\big[\|u-m(\mu)\|^2\big]
+\;=\; \E\!\big[\|u\|^2\big]-\|m(\mu)\|^2
+\;=\; 1 - \|m(\mu)\|^2 ,
+\end{equation}
+and identically
+\begin{equation}
+\label{eq:sumvar-v}
+\sum_{k=1}^d \Var(\tilde v_k)
+\;=\; 1 - \|m(\mu)\|^2 .
+\end{equation}
+
+\paragraph{Step 4: conclude.}
+Combine \eqref{eq:sum-bound}, \eqref{eq:sumvar-u} and \eqref{eq:sumvar-v} to get
+\begin{equation}
+\label{eq:residual-final}
+\E[\tilde u \cdot \tilde v]
+\;\le\; \eta_2 \,\big(1 - \|m(\mu)\|^2\big).
+\end{equation}
+
+\section{Regularized Surrogate proofs}
+\label{app:reg_proof}
+
+\subsection{Proof of Proposition \ref{prop:radial optimal}}
+\label{app:reg_prop_proof}
+
+\begin{proof}
+For any encoder $f$ with angular law $\mu$ the KL term satisfies (by the KL chain rule, see e.g. \citealp[Theorem B.2.1]{dupuis2011weak})
+\begin{equation}
+\KL(\rho\Vert\gamma_\lambda^{B})\ =\ \KL(\mu\Vert\sigma)\ +\ \int \KL\!\big(\kappa(\cdot\mid u)\ \|\ \xi(\cdot\mid u)\big)\,\mu(du),
+\end{equation}
+where $\rho(dz)=\mu(du)\kappa(dr\mid u)$ and $\gamma_\lambda^{B}(dz)=\sigma(du)\xi(dr\mid u)$ in polar coordinates $z=ru$. Thus, at fixed $\mu$, the KL term is minimized by choosing $\kappa(\cdot\mid u)=\xi(\cdot\mid u)$ $\mu$-a.s., and then $\KL(\rho\Vert\gamma_\lambda^{B})=\KL(\mu\Vert\sigma)$. 
+\end{proof}
+
+\subsection{Proof of Lemma \ref{lem:lb_kl}}
+\label{app:reg_lem_proof}
+
+\begin{proof}
+We can assume $\mu \ll \sigma$, otherwise $\KL(\mu\|\sigma)=+\infty$ and the claim is trivial. The claim is also trivially true if $m(\mu)=0$, so assume $m(\mu)\neq 0$. By the Donsker-Varadhan variational formula \citep[Lemma~1.4.3]{dupuis2011weak}
+\begin{equation}
+\mathrm{KL}(\mu\|\sigma)
+=\sup_{\varphi}\Big\{\E_{u\sim\mu}[\varphi(u)]
+-\log \E_{u\sim\sigma}\big[e^{\varphi(u)}\big]\Big\},
+\end{equation}
+where the supremum is taken over bounded measurable functions $\varphi:\Sph^{d-1}\to\R$. Taking $\varphi(u)=t w\cdot u$ for some unit vector $w\in\R^d$ and $t\in\R$, we have 
+\begin{equation}
+\mathrm{KL}(\mu\|\sigma)\geq
+\E_{u\sim\mu}[tw\cdot u]-\log \E_{u\sim \sigma}\big[e^{tw \cdot u}\big] = tw\cdot m(\mu)-\log \E_{u\sim\sigma}\big[e^{tw \cdot u}\big]\;.
+\end{equation}
+Suppose we showed that 
+\begin{equation}\label{eq:MGF bound}
+    \log \E_{u\sim\sigma}\big[e^{tw \cdot u}\big]\leq t^2/a
+\end{equation}
+for some $a>0$ for every choice of $t$ and $w$. Then picking $t=\frac{a}{2}\|m(\mu)\|$ and $w=m(\mu)/\|m(\mu)\|$, we have 
+\begin{equation}
+    \mathrm{KL}(\mu\|\sigma)\geq tw\cdot m(\mu)-t^2/a = \frac{a}{2}\|m(\mu)\|^2-\frac{a}{4}\|m(\mu)\|^2 = \frac{a}{4}\|m(\mu)\|^2\;.  
+\end{equation} 
+It is left to show \eqref{eq:MGF bound} with $a=4C(d-1)$.
+Now, since $g(u)=w\cdot u$ is $1$-Lipschitz on the sphere, then by a corollary of L\'{e}vy's isoperimetric inequality, 
+%
+for all $s\ge0$,
+\begin{equation}
+\sigma\left(|g|\geq s\right)\leq 2e^{-\frac{1}{2}(d-1)s^2}\;,
+\end{equation}
+where we used the fact that the median of $g$ is $0$. 
+Since $\E g=0$, this implies that for some universal $C'>0$, 
+\begin{equation}
+\log \E e^{tg}\leq\frac{2C'^2 t^2}{d-1}
+\end{equation}
+\citep[Proposition 2.6.1]{vershynin2018high}.
+This satisfies \eqref{eq:MGF bound} with $a=\frac{d-1}{2C'^2}$, and taking $C=1/(8C'^2)$, we are done.
+\end{proof}
+
+
+\section{Alignment-plateau proofs}
+\label{app:plateau_proof}
+
+\subsection{normalized representations}
+\label{app:plateau_proof_norm}
+\begin{lemma}[At the plateau the loss reduces to uniformity]
+\label{lem:reduces-to-uniformity}
+Under Assumption~\ref{assump:plateau}, the population InfoNCE objective \peqref{eq:pop} takes the form
+\begin{equation}
+\label{eq:J-plateau}
+\mathcal J(\mu)\;=\;\Phi(\mu)\;-\;\alpha\,\E[u\!\cdot\! v]
+\;=\;\Phi(\mu)\;-\;\alpha\big(\eta_2+r_{\mathrm{plat}}\big).
+\end{equation}
+hence minimizing $\mathcal J$ over probability laws $\mu$ on $\Sph^{d-1}$ is equivalent to minimizing $\Phi(\mu)$.
+Moreover, $\Phi(\mu)$ is uniquely minimized by the uniform law $\sigma$ on $\Sph^{d-1}$.
+\end{lemma}
+
+
+\begin{proof}[Proof.]
+At the plateau, $\E[u\!\cdot\! v]$ is the constant in \eqref{eq:alignment-plateau}, so the alignment term is independent of $\mu$, leaving the uniformity potential $\Phi(\mu)$ as the only objective.
+By \citet[Appendix~A]{wang2020understanding}, $\Phi$ is uniquely minimized at the uniform distribution on the sphere, i.e.\ $\mu=\sigma$. For consistency, the plateau value in \eqref{eq:alignment-plateau} must be feasible at $\mu=\sigma$.
+\end{proof}
+
+\emph{Remark.} In \eqref{eq:alignment-plateau}, $r_{\mathrm{plat}} \le 0$. By ~\eqref{eq:alignment_bound} at $\mu = \sigma$ ($m(\mu) = 0$) the alignment ceiling is $\eta_2$; the plateau value is not guaranteed to be feasible at $\mu=\sigma$ and must be verified. 
+
+% 
+\begin{lemma}[Maxwell-Poincaré \citep{diaconis1984asymptotics}]
+\label{lem:maxwell}
+Let $U_d$ be uniform on $\Sph^{d-1}$, where $U_{d,i}$ denotes the $i$-th coordinate of $U_d$. Fix $k\in\mathbb N$. Then
+\begin{equation}
+\label{eq:maxwell}
+\sqrt{d}(U_{d,1},\ldots,U_{d,k}) \;\Rightarrow\; \mathcal N(0,I_k) \qquad (d\to\infty).
+\end{equation}
+
+\end{lemma}
+A concrete rate of convergence was given by \citet{diaconis1987dozen}.
+\begin{theorem}\citep{diaconis1987dozen}
+If $1\leq k \leq d-4$, then 
+\begin{equation}
+\label{eq:tv-rate}
+d_{\mathrm{TV}}\!\big(\sqrt{d}(U_{d,1},\ldots,U_{d,k}),Z\big)
+\;\leq\;\frac{2(k+3)}{d-k-3}\;,
+\end{equation}
+where $Z \sim \mathcal{N}(0,I_k)$ and $d_{\mathrm{TV}}$ denotes the total variation distance.
+\label{thm:conv_rate}
+\end{theorem}
+Clearly, Lemma~\ref{lem:maxwell} and Theorem~\ref{thm:conv_rate} hold for any $k$ indices, or for any orthonormal projection of $U_d$ to $k$ dimensions.
+Combining Lemmas~\ref{lem:reduces-to-uniformity} and \ref{lem:maxwell}, we get Corollary~\ref{cor:gauss-k-simple}.
+
+
+\subsection{Unnormalized representations}
+\label{app:plateau_proof_unnorm}
+We now prove Proposition~\ref{prop:unnorm-unif} by reducing to the normalized case established above.
+
+\begin{proof}
+Let $z=f(X)\in\R^d$ denote the unnormalized representation and write its polar decomposition as
+$z = r\,u$ with $r=\|z\|>0$ and $u:=z/\|z\|\in\Sph^{d-1}$.
+By Lemma~\ref{lem:reduces-to-uniformity}, at the alignment plateau the population objective reduces to minimizing $\Phi(\mu)$, whose unique minimizer is the uniform law $\sigma$ on $\Sph^{d-1}$. Hence the angular component of any global minimizer satisfies $u \sim \sigma$ on $\Sph^{d-1}$.
+Assumption~\ref{assump:thin-shell} further gives thin-shell concentration of the radius: $r \xrightarrow[d\to\infty]{\mathsf P} r_0 \in (0,\infty)$.
+
+For any fixed $k\ge1$ and any fixed $k$-dimensional subspace, let $P_k$ be the corresponding orthogonal projector and set $u_k:=P_k u$.
+By the Maxwell-Poincar\'e spherical CLT (Lemma~\ref{lem:maxwell}),
+\begin{equation}
+\label{eq:angle-clt}
+\sqrt{d}\,u_k \;\Rightarrow\; \mathcal N(0,I_k) \qquad (d\to\infty).
+\end{equation}
+
+Let $z_k:=P_k z = r\,u_k$. Since $r \xrightarrow[d\to\infty]{\mathsf P} r_0$ and \eqref{eq:angle-clt} holds, Slutsky’s theorem \citep{van2000asymptotic} yields
+\begin{equation}
+\label{eq:slutsky-zk}
+\sqrt{d}\,z_k \;=\; r\,\sqrt{d}\,u_k \;\Rightarrow\; \mathcal N\!\big(0,\,r_0^2 I_k\big) \qquad (d\to\infty).
+\end{equation}
+This proves Proposition~\ref{prop:unnorm-unif}.
+\end{proof}
+
+\section{Exact alignment bound in plateau discussion}
+\label{app:exact_align}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{figures/vMF_illustrations.jpg}
+    \caption{\textbf{vMF exponential tilt distribution for different concentration scales kappa ($\kappa$).}}
+    \label{fig:vmf}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The following analysis begins from the alignment ceiling \peqref{eq:alignment_bound}: under a generalized plateau assumption (extending Assumption~\ref{assump:plateau}), the expected alignment is determined by the augmentation mildness $\eta_2$ and the squared mean norm $\|m(\mu)\|^2$, up to a negligible residual (noted as $r_{plat}$ in \eqref{eq:alignment-plateau}).  
+Substituting this relation into the population InfoNCE objective \peqref{eq:pop} yields the surrogate
+\begin{equation}
+\label{eq:Jlambda-app2}
+\mathcal J_q(\mu)
+\;=\;
+\Phi(\mu)\;-\;q\,\|m(\mu)\|^2,
+\qquad
+q \;=\; \alpha(1-\eta_2),
+\end{equation}
+where $\Phi(\mu)$ is the uniformity potential of \citet{wang2020understanding}.
+Thus, at the plateau, the population loss reduces to a trade-off between uniformity and the mean vector length.  
+
+\paragraph{Stationary points.}
+The surrogate involves the spherical convolution operator $P$ with kernel $e^{\alpha \xi\cdot\eta}$, which diagonalizes in spherical harmonics by the Funk-Hecke theorem \citep{atkinson2012spherical}.  
+Analyzing the Euler-Lagrange condition shows that in high dimensions $Ph$ must asymptotically take an exponential tilt form $Ph(\xi)\propto \exp(\beta w\cdot \xi)$.  
+Inverting this relation via Gegenbauer expansions and their decay properties \citep{szeg1939orthogonal} indicates that, under mild regularity, the stationary density $h$ is well-approximated in its leading modes by either the uniform law or a von~Mises-Fisher (vMF) tilt \citep{mardia2009directional}. This captures the dominant low-degree structure in high dimensions, though more complex stationary forms cannot be excluded.
+
+\paragraph{Implications.}
+Consequently, in high dimension the stationary points of the plateau surrogate are \emph{well-approximated} by either the uniform distribution (when $m(\mu)=0$) or a von Mises-Fisher (vMF) tilt aligned with an axis $w$ (when $m(\mu)\neq 0$); see Fig.~\ref{fig:vmf}. 
+The vMF concentration parameter $\kappa$ quantifies the strength of angular concentration around $w$ (larger $\kappa$ $\Rightarrow$ narrower cone). 
+This perspective helps explain why contrastive encoders often yield nearly uniform representations, with occasional vMF-like bias. For example, in CLIP, where a narrow-cone structure (a modality-dependent angular bias) has been observed \citep{liang2022mind}.
+
+
+
+\section{Experimental details}
+\label{app:exp}
+
+\subsection{Implementation details}
+\label{app:impl}
+
+\paragraph{Code and reproducibility.}
+Code is available \href{https://github.com/rbetser/InfoNCE-induces-Gaussian-distribution}{here}.
+All experiments were implemented in \texttt{PyTorch} with \texttt{torchvision}.
+Training was performed on a single 3090 NVIDIA RTX GPU with CUDA 11.8.
+
+\paragraph{Synthetic Laplace data experiments.}
+\begin{itemize}
+    \item \textbf{Dataset.} Laplace$(0,1)$ vectors of dimensions - $d_{data} = 1024$. We use a set of 20k samples for training, and 5k samples for testing.
+    \item \textbf{Representation dimensions.} The dimensions of representations vary: $d \in \{32,64,128,256\}$.
+    \item \textbf{Batch size.} Batch size in our experiments varies: $N \in \{8, 16, 32, 48, 64, 96, 128\}$.
+    \item \textbf{Training objective.} InfoNCE loss with temperature $\tau \in \{0.1, 0.2\}\,$. We report results for $\tau  = 0.1$, but note that results are similar.
+    \item \textbf{Augmentations.}
+    Each synthetic sample $x$ is perturbed to form two correlated views
+    \begin{equation}
+    \label{eq:aug_views}
+    x_1 \;=\; A\,x + \sqrt{1-A^2}\,\varepsilon_1,
+    \qquad
+    x_2 \;=\; A\,x + \sqrt{1-A^2}\,\varepsilon_2,
+    \end{equation}
+    where $\varepsilon_1,\varepsilon_2 \sim \mathcal N(0,I)$ are independent.
+    The parameter $A \in (0,1)$ controls the correlation between views.
+    After this linear Gaussian mixing, we apply light, independent jitter:
+    additive Gaussian noise with std $0.2$, feature dropout with probability $0.1$, 
+    and random multiplicative scaling by $\exp(\mathcal N(0,0.1^2))$.
+    Unless otherwise stated, we use $A=0.6$ (results for $A \in \{0.2,0.5,0.8\}$ appear in Fig.~\ref{fig:likelihood_correlation}).
+    \item \textbf{Optimization.} Optimizer: Adam. Learning rate $=\, 10^{-3}$. We ran 50-250 epochs depending on setup; unless stated otherwise, we report results at 150 epochs.
+    \item \textbf{Evaluation metrics.} 
+    norm concentration (CV), mean norm values, Gaussianity diagnostics (AD/DP) tests and uniformity vs.\ alignment comparison (based on cosine similarity).
+\end{itemize}
+
+\noindent \textbf{Additional synthetic data experiments.}
+
+For the Gaussian mixture setting:
+\begin{itemize}
+    \item \textbf{Dataset.} We generate 10k samples in $\mathbb{R}^d$ from a mixture of 25 equally weighted Gaussian components (1024 dimensions) with randomly sampled means and shared isotropic covariance. The component means are drawn independently at initialization and fixed throughout training.
+    \item \textbf{Augmentation.} Positive pairs are generated by independently sampling two views from the same underlying mixture component.
+    \item \textbf{Training.} A linear encoder maps inputs to a 256-dimensional representation space and is trained using the InfoNCE objective for 100 epochs.
+    \item \textbf{Evaluation metrics.} Normality diagnostics include norm concentration (CV) and coordinate-wise AD and DP statistics.
+\end{itemize}
+
+
+For the discrete binary setting:
+\begin{itemize}
+    \item \textbf{Dataset.} Each sample is a sparse binary vector of dimension 1024.
+    \item \textbf{Augmentation.} Positive pairs are generated by independently flipping a small fraction (0.1\%) of zero entries to ones.
+    \item \textbf{Training.} A linear encoder maps inputs to a 256-dimensional representation and is trained using the InfoNCE objective for 100 epochs. 
+    \item \textbf{Evaluation metrics.} Every 10 epochs, we evaluate normality diagnostics, including norm concentration (CV) and coordinate-wise AD and DP statistics.
+\end{itemize}
+
+
+\paragraph{CIFAR-10 experiments}
+\begin{itemize}
+    \item \textbf{Dataset.} CIFAR-10, training set size 50k, test set size 10k.
+    \item \textbf{Augmentations.} We apply the standard SimCLR-style augmentation pipeline: a random resized crop to $32\times32$ pixels with scale uniformly sampled from $(0.2,1.0)$, a random horizontal flip, color jitter with strengths $(0.8,0.8,0.8,0.2)$, and random conversion to grayscale with probability $0.2$.
+    \item \textbf{Architecture.} Two experimental settings: (i) a basic encoder composed of a two-layer MLP with nonlinearity, and (ii) a ResNet-18 encoder following the SimCLR protocol for the contrastive setting and trained with standard cross-entropy for the supervised setting (pretrained on ImageNet~\citep{deng2009imagenet}).
+    \item \textbf{Training objective.} InfoNCE with temperature $\tau= 0.1$ (cross-entropy for the supervised setting).
+    \item \textbf{Optimization.} Adam optimizer, learning rate $= 10^{-3}$, weight decay = $10^{-4}$, batch size $= 256$, epochs = 100.
+    \item \textbf{Evaluation metrics.}  norm concentration (CV), Gaussianity diagnostics (AD/DP) tests.
+\end{itemize}
+
+\paragraph{Pretrained model diagnostics}
+\begin{itemize}
+    \item \textbf{Models.} CLIP (ViT-L/14, text and image modalities), DINO (ViT-B/32), ResNet-34 and DenseNet.
+    \item \textbf{Datasets.} Full MS-COCO validation set (5k images) and the full ImageNet-R benchmark when noted.
+    \item \textbf{Feature extraction.} Last-layer embeddings; whitening applied when noted.
+    \item \textbf{Evaluation metrics.}  norm concentration (CV), Gaussianity diagnostics (AD/DP) tests and uniformity before and after whitening.
+\end{itemize}
+
+\subsection{Additional Experiments}
+\label{app:more_exp}
+
+\paragraph{Thin-shell concentration in pretrained models.}
+Fig.~\ref{fig:thin_shell} visualizes the radius distributions of representations from supervised (DenseNet, ResNet34) and self-supervised (CLIP image/text, DINO) pretrained models on MS-COCO. All models exhibit thin-shell concentration, with radius values tightly clustered around a characteristic norm. Notably, contrastive models display significantly stronger concentration (lower CV) than supervised counterparts, consistent with the Gaussian diagnostics reported in Table~\ref{table:gaussian_pretrained}. This reinforces the underlying near-Gaussian structure observed in self-supervised representations.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.99\linewidth]{figures/thin_shell.pdf}
+    \caption{\textbf{Thin-shell concentration across pretrained models.} 
+    Radius distributions of representations from supervised models (DenseNet, ResNet) and contrastive models (CLIP, DINO). 
+    All models exhibit thin-shell concentration, with contrastive methods showing tighter clustering (lower CV, \eqref{eq:cv-radius}).}
+
+    \label{fig:thin_shell}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=1.0\linewidth]{figures/uniformity_hist_b_sweep.jpg}
+    \caption{\textbf{Alignment and uniformity vs.\ batch size.}
+    Histogram view of cosine similarities for positive pairs (alignment) and negatives (uniformity), corresponding to Fig.~\ref{fig:uni_align_violin}.
+    As batch size increases, alignment remains high while uniformity improves, with negative-pair similarities concentrating near zero.
+    The middle panel is a zoom of the left; the right panel shows that at very low dimensionality, increasing batch size yields little uniformity gain.}
+    \label{fig:uni_align_hist_b}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=1.0\linewidth]{figures/uniformity_hist_d_sweep.jpg}
+    \caption{\textbf{Alignment and uniformity vs.\ dimensionality.}
+    Histogram view of cosine similarities for positive pairs (alignment) and negatives (uniformity), corresponding to Fig.~\ref{fig:uni_align_violin}.
+    As dimensionality increases, alignment stays high while uniformity improves, pushing negative-pair similarities toward zero.
+    The middle panel is a zoom of the left; the right panel highlights that with very small batch sizes, increasing dimensionality offers limited uniformity improvement.}
+    \label{fig:uni_align_hist_d}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Figs.~\ref{fig:uni_align_hist_b} and \ref{fig:uni_align_hist_d} provide alternative visualizations of Fig.~\ref{fig:uni_align_violin}, presenting the same experiments with a different display.  
+Both figures plot the distributions of cosine similarities for positive pairs (alignment) and for negatives (uniformity).  
+As batch size (Fig.~\ref{fig:uni_align_hist_b}) or dimensionality (Fig.~\ref{fig:uni_align_hist_d}) increases, uniformity improves (negative-pair similarities concentrate near zero) while alignment remains consistently high across settings.  
+These complementary views reinforce the observation from the main body: uniformity continues to improve with larger batches and higher dimensions, whereas alignment appears to saturate early.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=1.0\linewidth]{figures/uniformity_regular.pdf}
+    \caption{\textbf{Whitening and uniformity: unnormalized representations.} 
+    Cosine similarity histograms of negatives for CLIP (image, text) and DINO, before (raw) and after whitening. 
+    Unnormalized representations benefit from whitening, with distributions pushed closer to zero, reflecting enhanced uniformity. The y-axis (``Density'') represents the relative count in each bin (normalized by the total number of samples) rather than the probability density function.}
+
+    \label{fig:uniformity_pretrained}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=1.0\linewidth]{figures/uniformity_normalized.pdf}
+    \caption{\textbf{Whitening and uniformity: normalized representations.} 
+    Cosine similarity histograms of negatives for CLIP (image, text) and DINO, before (normalized) and after whitening. 
+    Normalized representations are already close to uniform; whitening provides a modest but consistent improvement.}
+    \label{fig:uniformity_normalized}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Additionally, we assess uniformity in several pretrained models before and after whitening. 
+Whitening consistently increases uniformity, indicating that these representations, which are already close to uniform (and approximately Gaussian; see Table~\ref{table:gaussian_pretrained}), become more isotropic once decorrelated and rescaled. This effect holds consistently across pretrained models (CLIP image, CLIP text, and DINO), for both normalized and unnormalized representations, see Figs.~\ref{fig:uniformity_pretrained}, \ref{fig:uniformity_normalized}. Thus, a simple post hoc projection via whitening can further enhance uniformity in practice.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.9\linewidth]{figures/likelihood_corr.pdf}
+    \caption{\textbf{Encoder ``pushforward''.} On synthetic data, the encoder maps Laplace-distributed inputs to approximately Gaussian representations. Because both source and target families admit tractable likelihoods, we can score entire sets and observe consistently high correlation across different augmentation strengths.}
+    \label{fig:likelihood_correlation}
+\end{figure}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+We examine the correlation between the data distribution and the representation distribution. 
+Using Laplace data as input and observing Gaussian representations at the output, we can compute likelihoods for both input and output sets.  
+Comparing these scores reveals strong correlation (Fig.~\ref{fig:likelihood_correlation}), indicating that the distribution is indeed ``pushed forward'' through the encoder.  
+This correlation remains stable across different augmentation strengths, showing that this ``pushforward'' behavior is insensitive to the level of augmentation.
+
+\end{document}

@@ -21,13 +21,16 @@ from agents.gcivl.state.byol import GCIVLBYOLAgent
 from agents.gcivl.state.tra import GCIVLTRAAgent
 from agents.gcivl.state.vib import GCIVLVIBAgent
 from agents.gcivl.state.vip import GCIVLVIPAgent
-from agents.daf.original import DAFAgent
+from agents.gcafu.original import GCAFUAgent
+from agents.gciql.original import GCIQLAgent
 from agents.hilp.original import HILPAgent
 from agents.mqe.original import MQEAgent
 from agents.tmd.original import TMDAgent
 from agents.qrl.original import QRLAgent
+from agents.daf.laf import LAFGCRLAgent
+from agents.daf.original import AFUDAFAgent
 from agents.ota.original import OTAAgent
-from agents.daf.original_v1 import DAFActorFreeAgent
+from agents.coghp.coghp import CoGHPAgent
 
 agents = dict(
     crl=CRLAgent,
@@ -58,8 +61,10 @@ agents = dict(
     gcivl_vip_vis=GCIVLVisualVIPAgent,
     crl_vip=CRLVIPAgent,
     gcfbc_vip=GCFBCVIPAgent,
-    # DAF agents
-    daf=DAFAgent,
+    # GCIQL agents.
+    gciql=GCIQLAgent,
+    # GCAFU agents.
+    gcafu=GCAFUAgent,
     # Hilp agents
     hilp=HILPAgent,
     # MQE agents
@@ -70,5 +75,8 @@ agents = dict(
     qrl=QRLAgent,
     # OTA agents
     ota=OTAAgent,
-    daf_actor_free=DAFActorFreeAgent,
+    # DAF agents
+    laf_gcrl=LAFGCRLAgent,
+    # CoGHP agents
+    coghp=CoGHPAgent,
 )

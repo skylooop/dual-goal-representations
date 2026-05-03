@@ -15,17 +15,17 @@ from utils.networks import GCActor, GCValue, MLP, ensemblize
 
 class HILPAgent(flax.struct.PyTreeNode):
     """Hilbert foundation policy (HILP) agent.
-    
+
     https://arxiv.org/abs/2402.15567
-    
+
     Note that for zero-shot RL, we used the intrinsic reward r(s, z, s') = phi(s')^T z following the HILP implementation:
     https://github.com/seohongpark/HILP/blob/be2431bbb75e3b13cbdb1dec11776c42ef0f1593/hilp_zsrl/url_benchmark/agent/sf.py#L67C5-L67C17.
-    
+
     For sampling latents, we mixed latents from the prior distribution with phi(s') following the HILP implementation:
     https://github.com/seohongpark/HILP/blob/be2431bbb75e3b13cbdb1dec11776c42ef0f1593/hilp_zsrl/url_benchmark/agent/sf.py#L735-L753.
-    
+
     For pre-training the policy, we learn the Q-value of the intrinsic reward directly instead of learning the successor feature.
-    
+
     """
 
     rng: Any
@@ -36,13 +36,13 @@ class HILPAgent(flax.struct.PyTreeNode):
     def neg_l2_dist(x, y, eps=1e-6):
         squared_dists = ((x - y) ** 2).sum(axis=-1)
         neg_dists = -jnp.sqrt(jnp.maximum(squared_dists, eps))
-        return neg_dists        
+        return neg_dists
 
     @staticmethod
     def expectile_loss(adv, diff, expectile):
         """Compute the expectile loss."""
         weight = jnp.where(adv >= 0, expectile, (1 - expectile))
-        return weight * (diff ** 2)
+        return weight * (diff**2)
 
     def repr_loss(self, batch, grad_params):
         """Compute the IVL-style representation loss.
@@ -53,122 +53,131 @@ class HILPAgent(flax.struct.PyTreeNode):
         compute the former and the current value function to compute the latter. This is similar to how double DQN
         mitigates overestimation bias.
         """
-        observations = batch['observations']
-        next_observations = batch['next_observations']
-        rewards = batch['rewards']
-        masks = batch['masks']
-        value_goals = batch['value_goals']
-        
+        observations = batch["observations"]
+        next_observations = batch["next_observations"]
+        rewards = batch["rewards"]
+        masks = batch["masks"]
+        value_goals = batch["value_goals"]
+
         # Compute advantages.
-        target_next_phis = self.network.select('target_obs_repr')(next_observations)
-        target_goal_phis = self.network.select('target_obs_repr')(value_goals)
+        target_next_phis = self.network.select("target_obs_repr")(next_observations)
+        target_goal_phis = self.network.select("target_obs_repr")(value_goals)
         target_next_vs = self.neg_l2_dist(target_next_phis, target_goal_phis)
         target_next_v = jnp.min(target_next_vs, axis=0)
-        q = rewards + self.config['discount'] * masks * target_next_v
+        q = rewards + self.config["discount"] * masks * target_next_v
 
-        target_phis = self.network.select('target_obs_repr')(observations)
+        target_phis = self.network.select("target_obs_repr")(observations)
         target_vs = self.neg_l2_dist(target_phis, target_goal_phis)
         target_v = jnp.mean(target_vs, axis=0)
         adv = q - target_v
 
         # Compute Bellman errors.
-        qs = rewards[None] + self.config['discount'] * masks[None] * target_next_vs
-        phis = self.network.select('obs_repr')(observations, params=grad_params)
-        goal_phis = self.network.select('obs_repr')(value_goals, params=grad_params)
+        qs = rewards[None] + self.config["discount"] * masks[None] * target_next_vs
+        phis = self.network.select("obs_repr")(observations, params=grad_params)
+        goal_phis = self.network.select("obs_repr")(value_goals, params=grad_params)
         vs = self.neg_l2_dist(phis, goal_phis)
 
         # Compute the expectile loss.
-        value_loss = self.expectile_loss(adv[None], qs - vs, self.config['expectile']).mean()
-        
+        value_loss = self.expectile_loss(
+            adv[None], qs - vs, self.config["expectile"]
+        ).mean()
+
         # Additional information for logging.
         v = jnp.mean(vs, axis=0)
 
         return value_loss, {
-            'value_loss': value_loss,
-            'v_mean': v.mean(),
-            'v_max': v.max(),
-            'v_min': v.min(),
+            "value_loss": value_loss,
+            "v_mean": v.mean(),
+            "v_max": v.max(),
+            "v_min": v.min(),
         }
 
     def critic_loss(self, batch, grad_params, rng):
         """Compute the critic loss."""
-        observations = batch['observations']
-        actions = batch['actions']
-        next_observations = batch['next_observations']
-        rewards = batch['latent_rewards']
-        latents = batch['latents']
-        
+        observations = batch["observations"]
+        actions = batch["actions"]
+        next_observations = batch["next_observations"]
+        rewards = batch["latent_rewards"]
+        latents = batch["latents"]
+
         # Sample next actions.
         rng, sample_rng = jax.random.split(rng)
-        next_dist = self.network.select('target_actor')(next_observations, latents, goal_encoded=True)
+        next_dist = self.network.select("target_actor")(
+            next_observations, latents, goal_encoded=True
+        )
         next_actions = next_dist.mode()
         noise = jnp.clip(
-            (jax.random.normal(sample_rng, next_actions.shape) * self.config['actor_noise']),
-            -self.config['actor_noise_clip'],
-            self.config['actor_noise_clip'],
+            (
+                jax.random.normal(sample_rng, next_actions.shape)
+                * self.config["actor_noise"]
+            ),
+            -self.config["actor_noise_clip"],
+            self.config["actor_noise_clip"],
         )
         next_actions = jnp.clip(next_actions + noise, -1, 1)
 
         # Compute target Q.
-        next_qs = self.network.select('target_critic')(
-            next_observations, latents, actions=next_actions)
-        if self.config['q_agg'] == 'mean':
+        next_qs = self.network.select("target_critic")(
+            next_observations, latents, actions=next_actions
+        )
+        if self.config["q_agg"] == "mean":
             next_q = jnp.mean(next_qs, axis=0)
         else:
             next_q = jnp.min(next_qs, axis=0)
-        target_q = rewards + self.config['discount'] * next_q
+        target_q = rewards + self.config["discount"] * next_q
 
         # Comppute TD loss.
-        qs = self.network.select('critic')(
-            observations, latents, actions=actions, params=grad_params)
+        qs = self.network.select("critic")(
+            observations, latents, actions=actions, params=grad_params
+        )
         critic_loss = jnp.mean((qs - target_q) ** 2)
 
         return critic_loss, {
-            'critic_loss': critic_loss,
-            'q_mean': qs.mean(),
-            'q_max': qs.max(),
-            'q_min': qs.min(),
+            "critic_loss": critic_loss,
+            "q_mean": qs.mean(),
+            "q_max": qs.max(),
+            "q_min": qs.min(),
         }
 
     def actor_loss(self, batch, grad_params):
         """Compute the RPG+BC actor loss."""
-        observations = batch['observations']
-        actions = batch['actions']
-        latents = batch['latents']
-        
+        observations = batch["observations"]
+        actions = batch["actions"]
+        latents = batch["latents"]
+
         # Sample actions.
-        dist = self.network.select('actor')(
-            observations, latents, goal_encoded=True, params=grad_params)
+        dist = self.network.select("actor")(
+            observations, latents, goal_encoded=True, params=grad_params
+        )
         q_actions = jnp.clip(dist.mode(), -1, 1)
-        
+
         # Compute Q loss.
-        qs = self.network.select('critic')(
-            observations, latents, actions=q_actions)
-        if self.config['q_agg'] == 'mean':
+        qs = self.network.select("critic")(observations, latents, actions=q_actions)
+        if self.config["q_agg"] == "mean":
             q = jnp.mean(qs, axis=0)
         else:
             q = jnp.min(qs, axis=0)
-        
+
         # Compute BC loss.
         bc_loss = jnp.mean((q_actions - actions) ** 2)
-        
+
         # Normalize Q values by the absolute mean to make the loss scale invariant.
         q_loss = -q.mean()
-        if self.config['normalize_q_loss']:
+        if self.config["normalize_q_loss"]:
             lam = jax.lax.stop_gradient(1 / jnp.abs(q).mean())
             q_loss = lam * q_loss
-        
-        actor_loss = q_loss + self.config['alpha'] * bc_loss
-        if self.config['tanh_squash']:
+
+        actor_loss = q_loss + self.config["alpha"] * bc_loss
+        if self.config["tanh_squash"]:
             action_std = dist._distribution.stddev()
         else:
             action_std = dist.stddev().mean()
 
         return actor_loss, {
-            'actor_loss': actor_loss,
-            'q_loss': q_loss,
-            'bc_loss': bc_loss,
-            'std': action_std.mean(),
+            "actor_loss": actor_loss,
+            "q_loss": q_loss,
+            "bc_loss": bc_loss,
+            "std": action_std.mean(),
         }
 
     @jax.jit
@@ -180,35 +189,37 @@ class HILPAgent(flax.struct.PyTreeNode):
         rng, latent_rng, critic_rng = jax.random.split(rng, 3)
 
         # Sample latents and intrinsic rewards.
-        batch['latents'], batch['latent_rewards'] = self.sample_latents(batch, latent_rng)
+        batch["latents"], batch["latent_rewards"] = self.sample_latents(
+            batch, latent_rng
+        )
 
         # Train the HILP representations.
         repr_loss, repr_info = self.repr_loss(batch, grad_params)
         for k, v in repr_info.items():
-            info[f'repr/{k}'] = v
+            info[f"repr/{k}"] = v
 
         # Train the critic using intrinsic rewards defined by the HILP representations.
         critic_loss, critic_info = self.critic_loss(batch, grad_params, critic_rng)
         for k, v in critic_info.items():
-            info[f'critic/{k}'] = v
+            info[f"critic/{k}"] = v
 
         # Train the actor to maximize the critic.
         actor_loss, actor_info = self.actor_loss(batch, grad_params)
         for k, v in actor_info.items():
-            info[f'actor/{k}'] = v
+            info[f"actor/{k}"] = v
 
         loss = repr_loss + critic_loss + actor_loss
-        
+
         return loss, info
 
     def target_update(self, network, module_name):
         """Update the target network."""
         new_target_params = jax.tree_util.tree_map(
-            lambda p, tp: p * self.config['tau'] + tp * (1 - self.config['tau']),
-            self.network.params[f'modules_{module_name}'],
-            self.network.params[f'modules_target_{module_name}'],
+            lambda p, tp: p * self.config["tau"] + tp * (1 - self.config["tau"]),
+            self.network.params[f"modules_{module_name}"],
+            self.network.params[f"modules_target_{module_name}"],
         )
-        network.params[f'modules_target_{module_name}'] = new_target_params
+        network.params[f"modules_target_{module_name}"] = new_target_params
 
     @jax.jit
     def update(self, batch):
@@ -219,32 +230,35 @@ class HILPAgent(flax.struct.PyTreeNode):
             return self.total_loss(batch, grad_params, rng=rng)
 
         new_network, info = self.network.apply_loss_fn(loss_fn=loss_fn)
-        self.target_update(new_network, 'obs_repr')
-        self.target_update(new_network, 'critic')
-        self.target_update(new_network, 'actor')
+        self.target_update(new_network, "obs_repr")
+        self.target_update(new_network, "critic")
+        self.target_update(new_network, "actor")
 
         return self.replace(network=new_network, rng=new_rng), info
 
     @jax.jit
     def infer_latent(self, batch):
         """Infer the latent variable using rewards on downstream tasks."""
-        phis = self.network.select('obs_repr')(batch['observations'])
-        if self.config['repr_agg'] == 'mean':
+        phis = self.network.select("obs_repr")(batch["observations"])
+        if self.config["repr_agg"] == "mean":
             phis = jnp.mean(phis, axis=0)
         else:
             phis = jnp.min(phis, axis=0)
-        if self.config['latent_reward'] == 'single':
-            latent = jnp.linalg.lstsq(phis, batch['rewards'])[0]
-        elif self.config['latent_reward'] == 'diff':
-            next_phis = self.network.select('obs_repr')(batch['next_observations'])
-            if self.config['repr_agg'] == 'mean':
+        if self.config["latent_reward"] == "single":
+            latent = jnp.linalg.lstsq(phis, batch["rewards"])[0]
+        elif self.config["latent_reward"] == "diff":
+            next_phis = self.network.select("obs_repr")(batch["next_observations"])
+            if self.config["repr_agg"] == "mean":
                 next_phis = jnp.mean(next_phis, axis=0)
             else:
                 next_phis = jnp.min(next_phis, axis=0)
-            latent = jnp.linalg.lstsq(next_phis - phis, batch['rewards'])[0]
-        if self.config['normalize_latent']:
-            latent = latent / jnp.linalg.norm(
-                latent, axis=-1, keepdims=True) * jnp.sqrt(self.config['latent_dim'])
+            latent = jnp.linalg.lstsq(next_phis - phis, batch["rewards"])[0]
+        if self.config["normalize_latent"]:
+            latent = (
+                latent
+                / jnp.linalg.norm(latent, axis=-1, keepdims=True)
+                * jnp.sqrt(self.config["latent_dim"])
+            )
 
         return latent
 
@@ -252,23 +266,29 @@ class HILPAgent(flax.struct.PyTreeNode):
     def sample_latents(self, batch, rng):
         """Sample latent variables and intrisic rewards."""
         rng, latent_rng, perm_rng, mix_rng = jax.random.split(rng, 4)
-        batch_size = batch['observations'].shape[0]
+        batch_size = batch["observations"].shape[0]
 
-        latents = jax.random.normal(latent_rng, shape=(batch_size, self.config['latent_dim']),
-                                    dtype=batch['actions'].dtype)
-        if self.config['normalize_latent']:
-            latents = latents / jnp.linalg.norm(
-                latents, axis=-1, keepdims=True) * jnp.sqrt(self.config['latent_dim'])
+        latents = jax.random.normal(
+            latent_rng,
+            shape=(batch_size, self.config["latent_dim"]),
+            dtype=batch["actions"].dtype,
+        )
+        if self.config["normalize_latent"]:
+            latents = (
+                latents
+                / jnp.linalg.norm(latents, axis=-1, keepdims=True)
+                * jnp.sqrt(self.config["latent_dim"])
+            )
 
-        phis = self.network.select('obs_repr')(batch['observations'])
-        if self.config['repr_agg'] == 'mean':
+        phis = self.network.select("obs_repr")(batch["observations"])
+        if self.config["repr_agg"] == "mean":
             phis = jnp.mean(phis, axis=0)
         else:
             phis = jnp.min(phis, axis=0)
-        
-        if self.config['latent_reward'] == 'diff':
-            next_phis = self.network.select('obs_repr')(batch['next_observations'])
-            if self.config['repr_agg'] == 'mean':
+
+        if self.config["latent_reward"] == "diff":
+            next_phis = self.network.select("obs_repr")(batch["next_observations"])
+            if self.config["repr_agg"] == "mean":
                 next_phis = jnp.mean(next_phis, axis=0)
             else:
                 next_phis = jnp.min(next_phis, axis=0)
@@ -278,19 +298,23 @@ class HILPAgent(flax.struct.PyTreeNode):
         covar = jnp.matmul(latent_phis.T, latent_phis) / batch_size
         inv_covar = jnp.linalg.pinv(covar)
         latent_phis = jnp.matmul(latent_phis, inv_covar)
-        if self.config['normalize_latent']:
-            latent_phis = latent_phis / jnp.linalg.norm(
-                latent_phis, axis=-1, keepdims=True) * jnp.sqrt(self.config['latent_dim'])
-        
+        if self.config["normalize_latent"]:
+            latent_phis = (
+                latent_phis
+                / jnp.linalg.norm(latent_phis, axis=-1, keepdims=True)
+                * jnp.sqrt(self.config["latent_dim"])
+            )
+
         latents = jnp.where(
-            jax.random.uniform(mix_rng, (batch_size, 1)) < self.config['latent_mix_prob'],
+            jax.random.uniform(mix_rng, (batch_size, 1))
+            < self.config["latent_mix_prob"],
             latents,
-            latent_phis
+            latent_phis,
         )
 
-        if self.config['latent_reward'] == 'single':
+        if self.config["latent_reward"] == "single":
             rewards = (phis * latents).sum(axis=-1)
-        elif self.config['latent_reward'] == 'diff':
+        elif self.config["latent_reward"] == "diff":
             rewards = ((next_phis - phis) * latents).sum(axis=-1)
         else:
             raise NotImplementedError
@@ -306,13 +330,18 @@ class HILPAgent(flax.struct.PyTreeNode):
         temperature=1.0,
     ):
         """Sample actions from the actor."""
-        dist = self.network.select('actor')(
-            observations, latents, goal_encoded=True, temperature=temperature)
+        dist = self.network.select("actor")(
+            observations, latents, goal_encoded=True, temperature=temperature
+        )
         actions = dist.mode()
         noise = jnp.clip(
-            (jax.random.normal(seed, actions.shape) * self.config['actor_noise'] * temperature),
-            -self.config['actor_noise_clip'],
-            self.config['actor_noise_clip'],
+            (
+                jax.random.normal(seed, actions.shape)
+                * self.config["actor_noise"]
+                * temperature
+            ),
+            -self.config["actor_noise_clip"],
+            self.config["actor_noise_clip"],
         )
         actions = jnp.clip(actions + noise, -1, 1)
         return actions
@@ -336,61 +365,69 @@ class HILPAgent(flax.struct.PyTreeNode):
         rng = jax.random.key(seed)
         rng, init_rng = jax.random.split(rng, 2)
 
-        ex_latents = jnp.ones((ex_actions.shape[0], config['latent_dim']), dtype=ex_actions.dtype)
+        ex_latents = jnp.ones(
+            (ex_actions.shape[0], config["latent_dim"]), dtype=ex_actions.dtype
+        )
 
         action_dim = ex_actions.shape[-1]
 
         # Define encoders.
         encoders = dict()
-        if config['encoder'] is not None:
-            encoder_module = encoder_modules[config['encoder']]
-            encoders['obs_repr'] = GCEncoder(state_encoder=encoder_module())
-            encoders['critic'] = GCEncoder(state_encoder=encoder_module())
-            encoders['actor'] = GCEncoder(state_encoder=encoder_module())
+        if config["encoder"] is not None:
+            encoder_module = encoder_modules[config["encoder"]]
+            encoders["obs_repr"] = GCEncoder(state_encoder=encoder_module())
+            encoders["critic"] = GCEncoder(state_encoder=encoder_module())
+            encoders["actor"] = GCEncoder(state_encoder=encoder_module())
 
         # Define representation, value, and actor networks.
         obs_repr_def = ensemblize(MLP, 2)(
-            hidden_dims=config['repr_hidden_dims'] + (config['latent_dim'], ),
-            layer_norm=config['repr_layer_norm'],
+            hidden_dims=config["repr_hidden_dims"] + (config["latent_dim"],),
+            layer_norm=config["repr_layer_norm"],
         )
 
         critic_def = GCValue(
-            hidden_dims=config['value_hidden_dims'],
-            layer_norm=config['value_layer_norm'],
+            hidden_dims=config["value_hidden_dims"],
+            layer_norm=config["value_layer_norm"],
             ensemble=True,
-            gc_encoder=encoders.get('critic'),
+            gc_encoder=encoders.get("critic"),
         )
         actor_def = GCActor(
-            hidden_dims=config['actor_hidden_dims'],
+            hidden_dims=config["actor_hidden_dims"],
             action_dim=action_dim,
             state_dependent_std=False,
-            tanh_squash=config['tanh_squash'],
+            tanh_squash=config["tanh_squash"],
             const_std=True,
-            final_fc_init_scale=config['actor_fc_scale'],
-            gc_encoder=encoders.get('actor'),
+            final_fc_init_scale=config["actor_fc_scale"],
+            gc_encoder=encoders.get("actor"),
         )
 
         network_info = dict(
-            obs_repr=(obs_repr_def, (ex_observations, )),
+            obs_repr=(obs_repr_def, (ex_observations,)),
             critic=(critic_def, (ex_observations, ex_latents, ex_actions)),
             actor=(actor_def, (ex_observations, ex_latents, True)),
-            target_obs_repr=(copy.deepcopy(obs_repr_def), (ex_observations, )),
-            target_critic=(copy.deepcopy(critic_def), (ex_observations, ex_latents, ex_actions)),
-            target_actor=(copy.deepcopy(actor_def), (ex_observations, ex_latents, True)),
+            target_obs_repr=(copy.deepcopy(obs_repr_def), (ex_observations,)),
+            target_critic=(
+                copy.deepcopy(critic_def),
+                (ex_observations, ex_latents, ex_actions),
+            ),
+            target_actor=(
+                copy.deepcopy(actor_def),
+                (ex_observations, ex_latents, True),
+            ),
         )
 
         networks = {k: v[0] for k, v in network_info.items()}
         network_args = {k: v[1] for k, v in network_info.items()}
 
         network_def = ModuleDict(networks)
-        network_tx = optax.adam(learning_rate=config['lr'])
-        network_params = network_def.init(init_rng, **network_args)['params']
+        network_tx = optax.adam(learning_rate=config["lr"])
+        network_params = network_def.init(init_rng, **network_args)["params"]
         network = TrainState.create(network_def, network_params, tx=network_tx)
 
         params = network.params
-        params['modules_target_obs_repr'] = params['modules_obs_repr']
-        params['modules_target_critic'] = params['modules_critic']
-        params['modules_target_actor'] = params['modules_actor']
+        params["modules_target_obs_repr"] = params["modules_obs_repr"]
+        params["modules_target_critic"] = params["modules_critic"]
+        params["modules_target_actor"] = params["modules_actor"]
 
         return cls(rng, network=network, config=flax.core.FrozenDict(**config))
 
@@ -399,24 +436,29 @@ def get_config():
     config = ml_collections.ConfigDict(
         dict(
             # Agent hyperparameters.
-            agent_name='hilp',  # Agent name.
+            agent_name="hilp",  # Agent name.
             lr=1e-4,  # Learning rate.
             batch_size=1024,  # Batch size.
-            repr_hidden_dims=(512, 512, 512, 512),  # Representation network hidden dimensions.
+            repr_hidden_dims=(
+                512,
+                512,
+                512,
+                512,
+            ),  # Representation network hidden dimensions.
             value_hidden_dims=(512, 512, 512, 512),  # Value network hidden dimensions.
             actor_hidden_dims=(512, 512, 512, 512),  # Actor network hidden dimensions.
             repr_layer_norm=False,  # Whether to use layer normalization for the representation.
             value_layer_norm=False,  # Whether to use layer normalization for the critic.
             actor_layer_norm=False,  # Whether to use layer normalization for the actor.
-            activation='gelu',  # Activation function.
+            activation="gelu",  # Activation function.
             latent_dim=128,  # HILP latent dimension.
             discount=0.99,  # Discount factor.
             tau=0.005,  # Target network update rate.
             expectile=0.5,  # IQL style expectile.
             normalize_latent=True,  # Whether to normalize backward representations.
-            repr_agg='mean',  # Aggregation method for observation representations.
-            q_agg='min',  # Aggregation method for Q.
-            latent_reward='single',  # Latent reward type ('single', 'diff').
+            repr_agg="mean",  # Aggregation method for observation representations.
+            q_agg="min",  # Aggregation method for Q.
+            latent_reward="single",  # Latent reward type ('single', 'diff').
             latent_mix_prob=0.5,  # Probability to replace latents sampled from the prior with learned representations.
             alpha=1.0,  # BC coefficient in DDPG+BC.
             tanh_squash=True,  # Whether to use tanh squash for the actor.
@@ -425,9 +467,11 @@ def get_config():
             actor_noise_clip=0.2,  # Actor noise clipping threshold.
             normalize_q_loss=True,  # Whether to normalize the Q loss.
             num_zero_shot_samples=100_000,  # Number of samples used to infer the task-specific latent.
-            encoder=ml_collections.config_dict.placeholder(str),  # Encoder name (None, 'impala_small', etc.).
+            encoder=ml_collections.config_dict.placeholder(
+                str
+            ),  # Encoder name (None, 'impala_small', etc.).
             # Dataset hyperparameters.
-            dataset_class='GCDataset',  # Dataset class name ('GCDataset', 'Dataset', etc.).
+            dataset_class="GCDataset",  # Dataset class name ('GCDataset', 'Dataset', etc.).
             discrete=False,
             oraclerep=False,
             norm=False,
@@ -441,7 +485,9 @@ def get_config():
             actor_geom_sample=False,  # Whether to use geometric sampling for future actor goals.
             gc_negative=True,  # Whether to use '0 if s == g else -1' (True) or '1 if s == g else 0' (False) as reward.
             p_aug=0.0,  # Probability of applying image augmentation.
-            frame_stack=ml_collections.config_dict.placeholder(int),  # Number of frames to stack.
+            frame_stack=ml_collections.config_dict.placeholder(
+                int
+            ),  # Number of frames to stack.
         )
     )
     return config

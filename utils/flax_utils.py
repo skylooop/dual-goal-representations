@@ -35,8 +35,8 @@ class ModuleDict(nn.Module):
         if name is None:
             if kwargs.keys() != self.modules.keys():
                 raise ValueError(
-                    f'When `name` is not specified, kwargs must contain the arguments for each module. '
-                    f'Got kwargs keys {kwargs.keys()} but module keys {self.modules.keys()}'
+                    f"When `name` is not specified, kwargs must contain the arguments for each module. "
+                    f"Got kwargs keys {kwargs.keys()} but module keys {self.modules.keys()}"
                 )
             out = {}
             for key, value in kwargs.items():
@@ -106,7 +106,7 @@ class TrainState(flax.struct.PyTreeNode):
         """
         if params is None:
             params = self.params
-        variables = {'params': params}
+        variables = {"params": params}
         if method is not None:
             method_name = getattr(self.model_def, method)
         else:
@@ -141,9 +141,15 @@ class TrainState(flax.struct.PyTreeNode):
         grad_min = jax.tree_util.tree_map(jnp.min, grads)
         grad_norm = jax.tree_util.tree_map(jnp.linalg.norm, grads)
 
-        grad_max_flat = jnp.concatenate([jnp.reshape(x, -1) for x in jax.tree_util.tree_leaves(grad_max)], axis=0)
-        grad_min_flat = jnp.concatenate([jnp.reshape(x, -1) for x in jax.tree_util.tree_leaves(grad_min)], axis=0)
-        grad_norm_flat = jnp.concatenate([jnp.reshape(x, -1) for x in jax.tree_util.tree_leaves(grad_norm)], axis=0)
+        grad_max_flat = jnp.concatenate(
+            [jnp.reshape(x, -1) for x in jax.tree_util.tree_leaves(grad_max)], axis=0
+        )
+        grad_min_flat = jnp.concatenate(
+            [jnp.reshape(x, -1) for x in jax.tree_util.tree_leaves(grad_min)], axis=0
+        )
+        grad_norm_flat = jnp.concatenate(
+            [jnp.reshape(x, -1) for x in jax.tree_util.tree_leaves(grad_norm)], axis=0
+        )
 
         final_grad_max = jnp.max(grad_max_flat)
         final_grad_min = jnp.min(grad_min_flat)
@@ -151,17 +157,18 @@ class TrainState(flax.struct.PyTreeNode):
 
         info.update(
             {
-                'grad/max': final_grad_max,
-                'grad/min': final_grad_min,
-                'grad/norm': final_grad_norm,
+                "grad/max": final_grad_max,
+                "grad/min": final_grad_min,
+                "grad/norm": final_grad_norm,
             }
         )
 
         return self.apply_gradients(grads=grads), info
 
+
 def save_agent(agent: flax.struct.PyTreeNode, save_dir: str, step: int):
     """Save the agent state using Orbax (modern API, orbax-checkpoint >= 0.6)."""
-    ckpt_dir = os.path.abspath(os.path.join(save_dir, 'checkpoints'))
+    ckpt_dir = os.path.abspath(os.path.join(save_dir, "checkpoints"))
     with ocp.CheckpointManager(
         ckpt_dir,
         options=ocp.CheckpointManagerOptions(max_to_keep=5, create=True),
@@ -174,7 +181,9 @@ def save_agent(agent: flax.struct.PyTreeNode, save_dir: str, step: int):
     print(f"Saved agent at step {step} to {ckpt_dir}")
 
 
-def restore_agent(agent: flax.struct.PyTreeNode, restore_path: str, step: int = None) -> flax.struct.PyTreeNode:
+def restore_agent(
+    agent: flax.struct.PyTreeNode, restore_path: str, step: int = None
+) -> flax.struct.PyTreeNode:
     """Restore the agent state using Orbax (modern API, orbax-checkpoint >= 0.6).
 
     Args:

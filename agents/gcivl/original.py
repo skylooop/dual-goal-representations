@@ -27,38 +27,14 @@ class GCIVLAgent(flax.struct.PyTreeNode):
         weight = jnp.where(adv >= 0, expectile, (1 - expectile))
         return weight * (diff**2)
 
-    def eikonal_loss(self, observations, goals, grad_params):
-        """Compute Eikonal regularization on value gradients."""
-        if (
-            not self.config["use_eikonal_loss"]
-            or self.config["eikonal_loss_weight"] <= 0.0
-        ):
-            return jnp.array(0.0, dtype=observations.dtype)
-
-        value_fn = self.network.select("value")
-
-        def distance1(state, goal):
-            v1, _ = value_fn(state[None, :], goal[None, :], params=grad_params)
-            return -v1[0]
-
-        def distance2(state, goal):
-            _, v2 = value_fn(state[None, :], goal[None, :], params=grad_params)
-            return -v2[0]
-
-        grad_distance1 = jax.vmap(jax.grad(distance1, argnums=0), in_axes=(0, 0))(
-            observations, goals
-        )
-        grad_distance2 = jax.vmap(jax.grad(distance2, argnums=0), in_axes=(0, 0))(
-            observations, goals
-        )
-
-        grad_norm1 = jnp.linalg.norm(grad_distance1, axis=-1)
-        grad_norm2 = jnp.linalg.norm(grad_distance2, axis=-1)
-        target = self.config["eikonal_target_norm"]
-        reg = jnp.mean((grad_norm1 - target) ** 2) + jnp.mean(
-            (grad_norm2 - target) ** 2
-        )
-        return self.config["eikonal_loss_weight"] * reg
+    @staticmethod
+    def z_loss_fn(x, y):
+        """
+        Implements Z(x, y) where:
+        Z(x, y) = (x + y)^2 if x >= 0
+        Z(x, y) = x^2 + y^2 otherwise
+        """
+        return jnp.where(x >= 0, jnp.square(x + y), jnp.square(x) + jnp.square(y))
 
     def value_loss(self, batch, grad_params):
         """Compute the IVL value loss.
@@ -75,53 +51,128 @@ class GCIVLAgent(flax.struct.PyTreeNode):
         next_v_t = jnp.minimum(next_v1_t, next_v2_t)
         q = batch["rewards"] + self.config["discount"] * batch["masks"] * next_v_t
 
-        (v1_t, v2_t) = self.network.select("target_value")(
-            batch["observations"], batch["value_goals"]
-        )
-        v_t = (v1_t + v2_t) / 2
-        adv = q - v_t
+        if not self.config["apply_z_loss"]:
+            (v1_t, v2_t) = self.network.select("target_value")(
+                batch["observations"], batch["value_goals"]
+            )
+            v_t = (v1_t + v2_t) / 2
+            adv = q - v_t
 
-        q1 = batch["rewards"] + self.config["discount"] * batch["masks"] * next_v1_t
-        q2 = batch["rewards"] + self.config["discount"] * batch["masks"] * next_v2_t
-        (v1, v2) = self.network.select("value")(
-            batch["observations"], batch["value_goals"], params=grad_params
-        )
-        v = (v1 + v2) / 2
+            q1 = batch["rewards"] + self.config["discount"] * batch["masks"] * next_v1_t
+            q2 = batch["rewards"] + self.config["discount"] * batch["masks"] * next_v2_t
+            (v1, v2) = self.network.select("value")(
+                batch["observations"], batch["value_goals"], params=grad_params
+            )
+            v = (v1 + v2) / 2
 
-        value_loss1 = self.expectile_loss(adv, q1 - v1, self.config["expectile"]).mean()
-        value_loss2 = self.expectile_loss(adv, q2 - v2, self.config["expectile"]).mean()
-        td_value_loss = value_loss1 + value_loss2
-        eikonal_loss = self.eikonal_loss(
-            batch["observations"],
-            batch["value_goals"],
-            grad_params,
-        )
-        value_loss = td_value_loss + eikonal_loss
+            value_loss1 = self.expectile_loss(
+                adv, q1 - v1, self.config["expectile"]
+            ).mean()
+            value_loss2 = self.expectile_loss(
+                adv, q2 - v2, self.config["expectile"]
+            ).mean()
+
+            value_loss = value_loss1 + value_loss2
+        else:
+            (adv1, adv2) = self.network.select("advantage")(
+                batch["observations"],
+                batch["actions"],
+                batch["value_goals"],
+                params=grad_params,
+            )
+            (v1, v2) = self.network.select("value")(
+                batch["observations"], batch["value_goals"], params=grad_params
+            )
+            v = (v1 + v2) / 2
+            q1 = batch["rewards"] + self.config["discount"] * batch["masks"] * next_v1_t
+            q2 = batch["rewards"] + self.config["discount"] * batch["masks"] * next_v2_t
+
+            indicator1 = jnp.where(adv1 + v1 < q, 1.0, 0.0)
+            indicator2 = jnp.where(adv2 + v2 < q, 1.0, 0.0)
+            Υ1 = (1 - 0.4 * indicator1) * v1 + 0.4 * indicator1 * jax.lax.stop_gradient(
+                v1
+            )
+            Υ2 = (1 - 0.4 * indicator2) * v2 + 0.4 * indicator2 * jax.lax.stop_gradient(
+                v2
+            )
+            value_loss1 = (
+                self.z_loss_fn(Υ1 - q, adv1).mean() + jnp.maximum(0, adv1).mean()
+            )
+            value_loss2 = (
+                self.z_loss_fn(Υ2 - q, adv2).mean() + jnp.maximum(0, adv2).mean()
+            )
+            value_loss = value_loss1 + value_loss2
 
         return value_loss, {
             "value_loss": value_loss,
-            "td_value_loss": td_value_loss,
-            "eikonal_loss": eikonal_loss,
             "v_mean": v.mean(),
             "v_max": v.max(),
             "v_min": v.min(),
         }
 
-    def actor_loss(self, batch, grad_params, rng=None):
-        """Compute the AWR actor loss."""
-        v1, v2 = self.network.select("value")(
+    def _dayan_advantage(self, batch):
+        """Compute Dayan gradient-based advantage (Equation 4, Dayan & Singh 1995).
+
+        A^w(s, a, g) = r(s, g) + (s' - s) · ∇_s V(s, g)
+
+        Uses autodiff to compute ∇_s V(s, g) and dots it with the transition
+        direction (s' - s), faithfully implementing the continuous-time advantage
+        in discrete form.
+        """
+        value_fn = self.network.select("value")
+
+        def scalar_value(s, g):
+            v1, v2 = value_fn(s[None], g[None])
+            return ((v1 + v2) / 2)[0]
+
+        # ∇_s V(s, g) via autodiff, shape: (batch, state_dim)
+        grad_v = jax.vmap(jax.grad(scalar_value, argnums=0))(
             batch["observations"], batch["actor_goals"]
         )
-        nv1, nv2 = self.network.select("value")(
-            batch["next_observations"], batch["actor_goals"]
-        )
-        v = (v1 + v2) / 2
-        nv = (nv1 + nv2) / 2
 
-        if self.config["actor_advantage_mode"] == "td":
-            adv = batch["rewards"] + self.config["discount"] * batch["masks"] * nv - v
+        # Transition direction: f(s, a) ≈ s' - s
+        delta_s = batch["next_observations"] - batch["observations"]
+
+        # Directional derivative: (s' - s) · ∇_s V(s, g)
+        directional_deriv = jnp.sum(delta_s * grad_v, axis=-1)
+
+        # Dayan advantage: r(s, g) + f(s, a) · ∇_s V(s, g)
+        adv = batch["rewards"] + directional_deriv
+
+        return adv, grad_v, directional_deriv
+
+    def actor_loss(self, batch, grad_params, rng=None):
+        """Compute the AWR actor loss.
+
+        Supports three advantage modes controlled by config['actor_advantage_mode']:
+        - 'vdelta': V(s', g) - V(s, g)  (default, original GCIVL)
+        - 'td':     r(s, g) + γ·mask·V(s', g) - V(s, g)  (standard TD advantage)
+        - 'dayan':  r(s, g) + (s' - s) · ∇_s V(s, g)  (Dayan Eq. 4, gradient-based)
+        """
+        mode = self.config["actor_advantage_mode"]
+
+        actor_info = {}
+
+        if mode == "dayan":
+            adv, grad_v, directional_deriv = self._dayan_advantage(batch)
+            actor_info["grad_v_norm"] = jnp.linalg.norm(grad_v, axis=-1).mean()
+            actor_info["directional_deriv"] = directional_deriv.mean()
         else:
-            adv = nv - v
+            v1, v2 = self.network.select("value")(
+                batch["observations"], batch["actor_goals"]
+            )
+            nv1, nv2 = self.network.select("value")(
+                batch["next_observations"], batch["actor_goals"]
+            )
+            v = (v1 + v2) / 2
+            nv = (nv1 + nv2) / 2
+
+            if mode == "td":
+                adv = (
+                    batch["rewards"] + self.config["discount"] * batch["masks"] * nv - v
+                )
+            else:  # 'vdelta' original
+                adv = nv - v
 
         exp_a = jnp.exp(adv * self.config["alpha"])
         exp_a = jnp.minimum(exp_a, 100.0)
@@ -133,11 +184,13 @@ class GCIVLAgent(flax.struct.PyTreeNode):
 
         actor_loss = -(exp_a * log_prob).mean()
 
-        actor_info = {
-            "actor_loss": actor_loss,
-            "adv": adv.mean(),
-            "bc_log_prob": log_prob.mean(),
-        }
+        actor_info.update(
+            {
+                "actor_loss": actor_loss,
+                "adv": adv.mean(),
+                "bc_log_prob": log_prob.mean(),
+            }
+        )
         if not self.config["discrete"]:
             actor_info.update(
                 {
@@ -222,7 +275,7 @@ class GCIVLAgent(flax.struct.PyTreeNode):
             ex_actions: Example batch of actions. In discrete-action MDPs, this should contain the maximum action value.
             config: Configuration dictionary.
         """
-        rng = jax.random.key(seed)
+        rng = jax.random.PRNGKey(seed)
         rng, init_rng = jax.random.split(rng, 2)
 
         if not config["oraclerep"]:
@@ -262,12 +315,23 @@ class GCIVLAgent(flax.struct.PyTreeNode):
                 const_std=config["const_std"],
                 gc_encoder=encoders.get("actor"),
             )
-
         network_info = dict(
             value=(value_def, (ex_observations, ex_goals)),
             target_value=(copy.deepcopy(value_def), (ex_observations, ex_goals)),
             actor=(actor_def, (ex_observations, ex_goals)),
         )
+
+        if config["apply_z_loss"]:
+            advantage_def = GCValue(
+                hidden_dims=config["value_hidden_dims"],
+                layer_norm=config["layer_norm"],
+                ensemble=True,
+                gc_encoder=encoders.get("value"),
+            )
+            network_info.update(
+                advantage=(advantage_def, (ex_observations, ex_actions, ex_goals))
+            )
+
         networks = {k: v[0] for k, v in network_info.items()}
         network_args = {k: v[1] for k, v in network_info.items()}
 
@@ -295,11 +359,9 @@ def get_config():
             discount=0.99,  # Discount factor.
             tau=0.005,  # Target network update rate.
             expectile=0.9,  # IQL expectile.
-            alpha=10.0,  # AWR temperature.
-            use_eikonal_loss=False,  # Whether to include Eikonal loss.
-            eikonal_loss_weight=0.0,  # Eikonal regularization coefficient on ||grad_s(-V)||.
-            eikonal_target_norm=1.0,  # Target norm in Eikonal regularizer.
-            actor_advantage_mode="td",  # 'td' for r + gamma * V(s') - V(s), or 'vdelta' for V(s') - V(s).
+            apply_z_loss=False,  # 'expectile' or 'afu'.
+            alpha=0.003,  # AWR temperature.
+            actor_advantage_mode="vdelta",  # Actor advantage: 'vdelta' (V(s')-V(s)), 'td' (r+γV(s')-V(s)), 'dayan' (r+(s'-s)·∇V).
             const_std=True,  # Whether to use constant standard deviation for the actor.
             discrete=False,  # Whether the action space is discrete.
             encoder=ml_collections.config_dict.placeholder(

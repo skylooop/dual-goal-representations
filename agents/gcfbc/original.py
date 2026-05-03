@@ -18,23 +18,23 @@ class GCFBCAgent(flax.struct.PyTreeNode):
 
     def actor_loss(self, batch, grad_params, rng=None):
         """Compute the flow BC loss."""
-        batch_size, action_dim = batch['actions'].shape
+        batch_size, action_dim = batch["actions"].shape
         x_rng, t_rng = jax.random.split(rng, 2)
 
         x_0 = jax.random.normal(x_rng, (batch_size, action_dim))
-        x_1 = batch['actions']
+        x_1 = batch["actions"]
         t = jax.random.uniform(t_rng, (batch_size, 1))
         x_t = (1 - t) * x_0 + t * x_1
         y = x_1 - x_0
 
-        pred = self.network.select('actor_flow')(
-            batch['observations'], batch['actor_goals'], x_t, t, params=grad_params
+        pred = self.network.select("actor_flow")(
+            batch["observations"], batch["actor_goals"], x_t, t, params=grad_params
         )
 
         actor_loss = jnp.mean((pred - y) ** 2)
 
         actor_info = {
-            'actor_loss': actor_loss,
+            "actor_loss": actor_loss,
         }
 
         return actor_loss, actor_info
@@ -48,7 +48,7 @@ class GCFBCAgent(flax.struct.PyTreeNode):
         rng, actor_rng = jax.random.split(rng)
         actor_loss, actor_info = self.actor_loss(batch, grad_params, actor_rng)
         for k, v in actor_info.items():
-            info[f'actor/{k}'] = v
+            info[f"actor/{k}"] = v
 
         loss = actor_loss
         return loss, info
@@ -78,13 +78,13 @@ class GCFBCAgent(flax.struct.PyTreeNode):
             seed,
             (
                 *observations.shape[:-1],
-                self.config['action_dim'],
+                self.config["action_dim"],
             ),
         )
-        for i in range(self.config['flow_steps']):
-            t = jnp.full((*observations.shape[:-1], 1), i / self.config['flow_steps'])
-            vels = self.network.select('actor_flow')(observations, goals, actions, t)
-            actions = actions + vels / self.config['flow_steps']
+        for i in range(self.config["flow_steps"]):
+            t = jnp.full((*observations.shape[:-1], 1), i / self.config["flow_steps"])
+            vels = self.network.select("actor_flow")(observations, goals, actions, t)
+            actions = actions + vels / self.config["flow_steps"]
         actions = jnp.clip(actions, -1, 1)
         return actions
 
@@ -108,33 +108,36 @@ class GCFBCAgent(flax.struct.PyTreeNode):
         rng = jax.random.PRNGKey(seed)
         rng, init_rng = jax.random.split(rng, 2)
 
-        if not config['oraclerep']:
+        if not config["oraclerep"]:
             ex_goals = ex_observations
 
-        assert not config['discrete']
+        assert not config["discrete"]
 
         ex_times = ex_actions[..., :1]
         action_dim = ex_actions.shape[-1]
 
         # Define actor network.
         actor_flow_def = ActorVectorField(
-            hidden_dims=config['actor_hidden_dims'],
+            hidden_dims=config["actor_hidden_dims"],
             action_dim=action_dim,
-            layer_norm=config['actor_layer_norm'],
+            layer_norm=config["actor_layer_norm"],
         )
 
         network_info = dict(
-            actor_flow=(actor_flow_def, (ex_observations, ex_goals, ex_actions, ex_times)),
+            actor_flow=(
+                actor_flow_def,
+                (ex_observations, ex_goals, ex_actions, ex_times),
+            ),
         )
         networks = {k: v[0] for k, v in network_info.items()}
         network_args = {k: v[1] for k, v in network_info.items()}
 
         network_def = ModuleDict(networks)
-        network_tx = optax.adam(learning_rate=config['lr'])
-        network_params = network_def.init(init_rng, **network_args)['params']
+        network_tx = optax.adam(learning_rate=config["lr"])
+        network_params = network_def.init(init_rng, **network_args)["params"]
         network = TrainState.create(network_def, network_params, tx=network_tx)
 
-        config['action_dim'] = action_dim
+        config["action_dim"] = action_dim
         return cls(rng, network=network, config=flax.core.FrozenDict(**config))
 
 
@@ -142,17 +145,19 @@ def get_config():
     config = ml_collections.ConfigDict(
         dict(
             # Agent hyperparameters.
-            agent_name='gcfbc',  # Agent name.
+            agent_name="gcfbc",  # Agent name.
             lr=3e-4,  # Learning rate.
             batch_size=1024,  # Batch size.
             actor_hidden_dims=(512, 512, 512),  # Actor network hidden dimensions.
             actor_layer_norm=True,  # Whether to use layer normalization for the actor.
             discount=0.99,  # Discount factor (unused by default; can be used for geometric goal sampling in GCDataset).
             discrete=False,  # Whether the action space is discrete.
-            action_dim=ml_collections.config_dict.placeholder(int),  # Action dimension (will be set automatically).
+            action_dim=ml_collections.config_dict.placeholder(
+                int
+            ),  # Action dimension (will be set automatically).
             flow_steps=10,  # Number of flow steps.
             # Dataset hyperparameters.
-            dataset_class='GCDataset',  # Dataset class name.
+            dataset_class="GCDataset",  # Dataset class name.
             oraclerep=False,  # Whether to use oracle goal representations.
             norm=False,  # Whether to use dataset normalization.
             value_p_curgoal=0.0,  # Unused (defined for compatibility with GCDataset).
@@ -165,7 +170,9 @@ def get_config():
             actor_geom_sample=False,  # Whether to use geometric sampling for future actor goals.
             gc_negative=True,  # Unused (defined for compatibility with GCDataset).
             p_aug=0.0,  # Probability of applying image augmentation.
-            frame_stack=ml_collections.config_dict.placeholder(int),  # Number of frames to stack.
+            frame_stack=ml_collections.config_dict.placeholder(
+                int
+            ),  # Number of frames to stack.
         )
     )
     return config
