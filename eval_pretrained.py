@@ -43,7 +43,7 @@ flags.DEFINE_integer(
 
 # Eval hypers.
 flags.DEFINE_integer("eval_tasks", None, "Number of tasks to evaluate (None for all).")
-flags.DEFINE_integer("eval_episodes", 25, "Number of episodes for each task.")
+flags.DEFINE_integer("eval_episodes", 50, "Number of episodes for each task.")
 flags.DEFINE_float("eval_temperature", 0.0, "Actor temperature for evaluation.")
 flags.DEFINE_float("eval_gaussian", None, "Action Gaussian noise for evaluation.")
 flags.DEFINE_float("eval_goal_gaussian", None, "Goal Gaussian noise for evaluation.")
